@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>СибГИУ Moodle — Попытка теста (Тестовый полигон)</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; background: #f2f4f7; color: #212529; margin: 0; }
+    .topbar { background: #1e3a5f; color: #fff; padding: 10px 24px; display: flex; justify-content: space-between; align-items: center; }
+    .layout { display: grid; grid-template-columns: 1fr 290px; gap: 20px; max-width: 1320px; margin: 20px auto; padding: 0 16px; align-items: start; }
+    .que { display: grid; grid-template-columns: 130px 1fr; gap: 16px; margin-bottom: 20px; }
+    .que .info { background: #e9ecef; border: 1px solid #ced4da; border-radius: 4px; padding: 10px; font-size: 12.5px; }
+    .que .info .no { font-size: 15px; font-weight: 700; margin-bottom: 6px; display: block; cursor: pointer; }
+    .que .formulation { background: #e7f3f5; border: 1px solid #bee5eb; border-radius: 4px; padding: 16px; }
+    .que .qtext { font-size: 14.5px; line-height: 1.5; margin-bottom: 14px; }
+    .answer > div { margin-bottom: 8px; }
+    /* Навигация справа как в СибГИУ Moodle */
+    #mod_quiz_navblock { background: #fff; border: 1px solid #dee2e6; border-radius: 4px; padding: 14px; position: sticky; top: 20px; }
+    #mod_quiz_navblock h4 { margin: 0 0 12px 0; font-size: 14px; color: #343a40; }
+    .qn_buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+    .qnbutton {
+      display: inline-flex; flex-direction: column; align-items: center; justify-content: center;
+      width: 36px; height: 42px; border: 1px solid #adb5bd; border-radius: 4px;
+      background: #fff; color: #212529; text-decoration: none; font-weight: 600; font-size: 13px;
+      position: relative; cursor: pointer;
+    }
+    .qnbutton.thispage { border-width: 2px; border-color: #212529; }
+    .qnbutton .trafficlight { width: 100%; height: 10px; background: #e9ecef; position: absolute; bottom: 0; left: 0; border-radius: 0 0 3px 3px; }
+    /* Drag & Drop */
+    .drop { display: inline-block; min-width: 110px; min-height: 24px; border: 1px dashed #495057; background: #fff; padding: 2px 8px; border-radius: 4px; vertical-align: middle; margin: 0 4px; font-weight: 600; color: #0d6efd; }
+    .drag-bank { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    .draghome.draggable { padding: 5px 10px; background: #fff; border: 1px solid #6c757d; border-radius: 4px; cursor: grab; font-size: 13px; box-shadow: 0 1px 2px rgba(0,0,0,0.08); }
+    /* CodeRunner */
+    .coderunnerexamples { width: 100%; border-collapse: collapse; margin: 10px 0; background: #fff; font-size: 13px; }
+    .coderunnerexamples th, .coderunnerexamples td { border: 1px solid #ced4da; padding: 6px 10px; text-align: left; font-family: monospace; }
+    .coderunner-answer { width: 100%; min-height: 130px; font-family: Consolas, monospace; font-size: 13px; padding: 8px; border: 1px solid #adb5bd; border-radius: 4px; white-space: pre; tab-size: 4; }
+    /* Proctoring Monitor */
+    .proctor-bar { background: #fff3cd; border: 1px solid #ffeeba; padding: 10px 16px; border-radius: 4px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <div><b>do.sibsiu.ru/day/</b> — Экзаменационное тестирование</div>
+    <div class="usertext">Теререв Виталий (Тестовый режим)</div>
+  </div>
+
+  <div class="layout">
+    <main>
+      <div class="proctor-bar">
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a12 12 0 0 0 8.5 3a12 12 0 0 1 -8.5 15a12 12 0 0 1 -8.5 -15a12 12 0 0 0 8.5 -3" /><path d="M11 11a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" /><path d="M12 12l0 2.5" /></svg>
+          <b>Детектор слежки Moodle (переключения вкладок / потеря фокуса):</b>
+          <span>Зафиксировано нарушений: <b id="proctorCount" style="color:#dc3545;">0</b></span>
+          <span id="proctorLast" style="color:#6c757d;margin-left:8px;">(после запуска 1.js счётчик должен оставаться 0 при переключении вкладок)</span>
+        </div>
+        <button onclick="openSeparateExamWindow()" style="padding:6px 12px;background:#1e3a5f;color:#fff;border:none;border-radius:4px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;">
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2v6a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2v-6" /><path d="M11 16a1 1 0 1 0 2 0a1 1 0 0 0 -2 0" /><path d="M8 11v-4a4 4 0 1 1 8 0v4" /></svg>
+          <span>Открыть тест в ОТДЕЛЬНОМ ОКНЕ (SecureWindow)</span>
+        </button>
+      </div>
+
+      <!-- ВОПРОС 1: С картинкой и одиночным выбором -->
+      <div class="que multichoice" id="question-1">
+        <div class="info">
+          <span class="no">Вопрос 1</span>
+          <div>Пока нет ответа</div>
+          <div>Балл: 1,00</div>
+        </div>
+        <div class="formulation">
+          <div class="qtext">
+            Какой паттерн проектирования ООП изображён на приведённой UML-схеме ниже и гарантирует наличие только одного экземпляра класса?
+            <div style="margin-top:10px;">
+              <img id="umlSampleImg" alt="UML схема паттерна" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='360' height='130'><rect width='360' height='130' fill='%23ffffff' stroke='%231e3a5f' stroke-width='2'/><line x1='0' y1='40' x2='360' y2='40' stroke='%231e3a5f' stroke-width='2'/><text x='130' y='26' font-family='monospace' font-size='16' font-weight='bold' fill='%231e3a5f'>DatabaseInstance</text><text x='16' y='68' font-family='monospace' font-size='13' fill='%23333'>- static instance: DatabaseInstance</text><text x='16' y='92' font-family='monospace' font-size='13' fill='%23333'>- DatabaseInstance()</text><text x='16' y='114' font-family='monospace' font-size='13' font-weight='bold' fill='%230d6efd'>+ static getInstance(): DatabaseInstance</text></svg>">
+            </div>
+          </div>
+          <div class="answer">
+            <div class="r0"><input type="radio" name="q1" id="q1_a"><label for="q1_a">а. Фабричный метод (Factory Method)</label></div>
+            <div class="r1"><input type="radio" name="q1" id="q1_b"><label for="q1_b">б. Одиночка (Singleton)</label></div>
+            <div class="r0"><input type="radio" name="q1" id="q1_c"><label for="q1_c">в. Наблюдатель (Observer)</label></div>
+            <div class="r1"><input type="radio" name="q1" id="q1_d"><label for="q1_d">г. Декоратор (Decorator)</label></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ВОПРОС 2: Перетаскивание (Drag & Drop) -->
+      <div class="que ddwtos" id="question-2">
+        <div class="info">
+          <span class="no">Вопрос 2</span>
+          <div>Пока нет ответа</div>
+          <div>Балл: 2,00</div>
+        </div>
+        <div class="formulation">
+          <div class="qtext">
+            Перетащите названия структур данных в пропуски: структура LIFO («последним пришёл — первым вышел») называется <span class="drop place1"></span>, а структура FIFO («первым пришёл — первым вышел») называется <span class="drop place2"></span>.Для быстрого поиска по ключу за O(1) используется <span class="drop place3"></span>.
+          </div>
+          <div class="answer drag-bank">
+            <span class="draghome draggable">Очередь (Queue)</span>
+            <span class="draghome draggable">Стек (Stack)</span>
+            <span class="draghome draggable">Хеш-таблица (Hash Table)</span>
+            <span class="draghome draggable">Двусвязный список</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ВОПРОС 3: Таблица соответствия (Matching) -->
+      <div class="que match" id="question-3">
+        <div class="info">
+          <span class="no">Вопрос 3</span>
+          <div>Пока нет ответа</div>
+          <div>Балл: 1,00</div>
+        </div>
+        <div class="formulation">
+          <div class="qtext">Установите соответствие между уровнями модели OSI и сетевыми протоколами:</div>
+          <table class="answer" style="width:100%;border-collapse:collapse;">
+            <tr>
+              <td class="text" style="padding:6px;">Сетевой уровень (L3)</td>
+              <td class="control" style="padding:6px;">
+                <select><option>Выберите...</option><option>IP / ICMP</option><option>TCP / UDP</option><option>HTTP / DNS</option></select>
+              </td>
+            </tr>
+            <tr>
+              <td class="text" style="padding:6px;">Транспортный уровень (L4)</td>
+              <td class="control" style="padding:6px;">
+                <select><option>Выберите...</option><option>IP / ICMP</option><option>TCP / UDP</option><option>HTTP / DNS</option></select>
+              </td>
+            </tr>
+            <tr>
+              <td class="text" style="padding:6px;">Прикладной уровень (L7)</td>
+              <td class="control" style="padding:6px;">
+                <select><option>Выберите...</option><option>IP / ICMP</option><option>TCP / UDP</option><option>HTTP / DNS</option></select>
+              </td>
+            </tr>
+          </table>
+        </div>
+      </div>
+
+      <!-- ВОПРОС 4: Окно для ввода кода (CodeRunner Python3) -->
+      <div class="que coderunner" id="question-4">
+        <div class="info">
+          <span class="no">Вопрос 4</span>
+          <div>Пока нет ответа</div>
+          <div>Балл: 5,00</div>
+        </div>
+        <div class="formulation">
+          <div class="qtext">
+            Напишите функцию <code>filter_even(nums)</code> на Python, которая принимает список целых чисел и возвращает новый список, содержащий только чётные числа в исходном порядке.
+          </div>
+          <table class="coderunnerexamples">
+            <thead><tr><th>Тест (Input)</th><th>Результат (Expected)</th></tr></thead>
+            <tbody>
+              <tr><td class="c0">print(filter_even([1, 2, 3, 4, 5, 6]))</td><td class="c1">[2, 4, 6]</td></tr>
+              <tr><td class="c0">print(filter_even([7, 9, 11]))</td><td class="c1">[]</td></tr>
+            </tbody>
+          </table>
+          <div class="answer">
+            <textarea id="coderunner_ta_4" class="coderunner-answer" data-lang="Python3" data-reload-text="def filter_even(nums):&#10;    # Напишите решение здесь&#10;    pass">def filter_even(nums):
+    # Напишите решение здесь
+    pass</textarea>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- ПРАВЫЙ БЛОК НАВИГАЦИИ ПО ТЕСТУ (НАВЕДИ МЫШЬ НА НОМЕР ВОПРОСА!) -->
+    <aside id="mod_quiz_navblock">
+      <h4>Навигация по тесту</h4>
+      <div style="font-size:11.5px;color:#6c757d;margin-bottom:10px;">
+        Наведи курсор на номер вопроса ниже, чтобы увидеть незаметное окно с ответом от друга:
+      </div>
+      <div class="qn_buttons">
+        <a class="qnbutton thispage" id="quiznavbutton1" href="#question-1" title="Вопрос 1"><span class="thispageholder"></span>1<span class="trafficlight"></span></a>
+        <a class="qnbutton thispage" id="quiznavbutton2" href="#question-2" title="Вопрос 2"><span class="thispageholder"></span>2<span class="trafficlight"></span></a>
+        <a class="qnbutton thispage" id="quiznavbutton3" href="#question-3" title="Вопрос 3"><span class="thispageholder"></span>3<span class="trafficlight"></span></a>
+        <a class="qnbutton thispage" id="quiznavbutton4" href="#question-4" title="Вопрос 4"><span class="thispageholder"></span>4<span class="trafficlight"></span></a>
+      </div>
+    </aside>
+  </div>
+
+  <script>
+    // Симуляция слежки Moodle за переключением вкладок и потерей фокуса
+    let violations = 0;
+    function logProctorViolation(reason) {
+      violations++;
+      document.getElementById('proctorCount').textContent = String(violations);
+      document.getElementById('proctorLast').textContent = 'Последнее срабатывание: ' + reason;
+    }
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) logProctorViolation('visibilitychange (вкладка свёрнута)');
+    });
+    window.addEventListener('blur', () => {
+      logProctorViolation('window.blur (потеря фокуса окна)');
+    });
+
+    function openSeparateExamWindow() {
+      window.open(location.href, 'quizpopup', 'menubar=0,location=0,scrollbars=1,resizable=1,width=1180,height=820');
+    }
+  </script>
+</body>
+</html>

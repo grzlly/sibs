@@ -1370,6 +1370,8 @@
     doc.addEventListener('click', (e) => {
       const drawerToggle = e.target.closest('[data-target="theme_boost-drawers-blocks"], [data-action="toggle"][data-target*="drawer"], .drawer-right-toggle button, [data-toggler="drawers"], button[aria-label*="панел"]');
       if (drawerToggle) {
+        e.preventDefault();
+        e.stopPropagation();
         const targetId = drawerToggle.getAttribute('data-target') || 'theme_boost-drawers-blocks';
         const drawer = doc.getElementById(targetId) || doc.querySelector('.' + targetId) || doc.querySelector('#theme_boost-drawers-blocks');
         if (drawer) {

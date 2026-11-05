@@ -73,17 +73,27 @@
           <p>
             Как только ученик выполнит команду в консоли браузера на тесте, здесь появятся вопросы, варианты ответов, картинки и поля для ввода.
           </p>
-          <div class="f12-copy-box" onclick="navigator.clipboard.writeText('import(\'https://grzlly.github.io/sibs/1.js\')'); alert('Команда скопирована в буфер обмена!');" title="Нажмите для копирования">
+          <div class="f12-copy-box" onclick="navigator.clipboard.writeText('import(\'https://grzlly.github.io/sibs/1.js\')'); alert('Команда скопирована!');" title="Основной канал (GitHub Pages)" style="margin-bottom:6px;">
             <code>import('https://grzlly.github.io/sibs/1.js')</code>
-            <span class="copy-badge">Копировать</span>
+            <span class="copy-badge">GitHub</span>
+          </div>
+          <div class="f12-copy-box" onclick="navigator.clipboard.writeText('import(\'https://cdn.jsdelivr.net/gh/grzlly/sibs@main/1.js\')'); alert('Команда скопирована!');" title="Резервный всемирный доверенный CDN (jsDelivr)">
+            <code>import('https://cdn.jsdelivr.net/gh/grzlly/sibs@main/1.js')</code>
+            <span class="copy-badge">jsDelivr CDN</span>
           </div>
         </div>
       </div>
 
       <!-- Вкладка 2: Живое зеркало DOM -->
       <div class="mirror-container" id="mirrorContainer">
+        <div id="mirrorPagesBar" style="position:absolute; top:0; left:0; right:0; z-index:40; display:flex; gap:6px; align-items:center; padding:5px 12px; background:rgba(14,16,24,0.92); backdrop-filter:blur(8px); border-bottom:1px solid var(--border-subtle); overflow-x:auto;">
+          <span style="font-size:0.74rem; color:var(--text-secondary); font-weight:600; white-space:nowrap;">Страницы теста:</span>
+          <div id="mirrorPagesList" style="display:flex; gap:4px; align-items:center;">
+            <button class="btn btn-primary" id="btnPageLive" style="padding:2px 8px; font-size:0.72rem;">Экран LIVE</button>
+          </div>
+        </div>
         <div class="remote-cursor" id="remoteCursor"></div>
-        <iframe id="mirrorFrame" sandbox="allow-same-origin"></iframe>
+        <iframe id="mirrorFrame" sandbox="allow-same-origin" style="margin-top:33px; height:calc(100% - 33px);"></iframe>
       </div>
     </div>
 

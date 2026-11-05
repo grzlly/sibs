@@ -714,23 +714,23 @@
 
     box = doc.createElement('div');
     box.id = 'sib-stealth-nav-popup';
-    // Стилизовано под нативную системную подсказку состояния вопроса Moodle (серо-белая карточка)
+    // 100% маскировка под системный Bootstrap 4 / Moodle Clean Popover
     box.style.cssText = [
       'position: fixed',
       'z-index: 2147483646',
       'display: none',
-      'width: 270px',
-      'max-height: 240px',
+      'width: 280px',
+      'max-height: 250px',
       'overflow-y: auto',
-      'background: rgba(248, 249, 250, 0.98)',
+      'background: #ffffff',
       'color: #212529',
-      'border: 1px solid #ced4da',
+      'border: 1px solid rgba(0,0,0,0.18)',
       'border-radius: 4px',
-      'padding: 7px 9px',
-      'font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif',
+      'padding: 8px 10px',
+      'font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
       'font-size: 11.5px',
-      'line-height: 1.4',
-      'box-shadow: 0 2px 8px rgba(0,0,0,0.10)',
+      'line-height: 1.45',
+      'box-shadow: 0 4px 12px rgba(0,0,0,0.12)',
       'user-select: text',
       'pointer-events: auto'
     ].join(';');
@@ -767,29 +767,29 @@
     const lastGeneral = generalHints.length > 0 ? generalHints[generalHints.length - 1] : null;
 
     if (!ans && !lastGeneral) {
-      box.innerHTML = `<div style="color:#6c757d;font-size:11px;">Вопрос №${escapeHtml(qNum)}: ожидание ответа...</div>`;
+      box.innerHTML = `<div style="color:#6c757d;font-size:11px;">Справка Moodle • Вопрос №${escapeHtml(qNum)} (ожидание данных)...</div>`;
     } else {
       let html = '';
       if (ans) {
         const exactCode = decodeExactCode(ans);
         const isCode = !!(ans.codeBase64 || ans.code || ans.isCode || (exactCode.includes('\n') && ans.type && ans.type.includes('Код')));
-        html += `<div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #e9ecef;padding-bottom:3px;margin-bottom:5px;color:#495057;font-size:10.5px;gap:6px;">
-          <span><b>№${escapeHtml(qNum)}</b> ${ans.optionIndex ? `• Вариант: <b>${escapeHtml(ans.optionIndex)}</b>` : ''}</span>
-          <span style="display:inline-flex;gap:6px;">
-            <a href="#" id="sib-copy-ans-btn" style="color:#495057;text-decoration:underline;cursor:pointer;font-size:10px;">[Копировать]</a>
-            <a href="#" id="sib-apply-ans-btn" style="color:#495057;text-decoration:underline;cursor:pointer;font-size:10px;">[${isCode ? 'Вставить код' : 'Применить'}]</a>
+        html += `<div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #e9ecef;padding-bottom:4px;margin-bottom:6px;color:#6c757d;font-size:11px;">
+          <span><b>Справка к вопросу №${escapeHtml(qNum)}</b> ${ans.optionIndex ? `• Вар: <b>${escapeHtml(ans.optionIndex)}</b>` : ''}</span>
+          <span style="display:inline-flex;gap:8px;">
+            <a href="#" id="sib-copy-ans-btn" style="color:#6c757d;text-decoration:underline;cursor:pointer;font-size:10.5px;">Копировать</a>
+            <a href="#" id="sib-apply-ans-btn" style="color:#28a745;text-decoration:underline;cursor:pointer;font-size:10.5px;font-weight:500;">${isCode ? 'Вставить код' : 'Заполнить'}</a>
           </span>
         </div>`;
 
         if (isCode) {
-          html += `<pre style="margin:0;padding:6px;background:#f1f3f5;border:1px solid #dee2e6;border-radius:3px;font-family:Consolas,'Courier New',monospace;font-size:10.5px;line-height:1.35;white-space:pre;tab-size:4;overflow-x:auto;overflow-y:auto;max-height:165px;">${escapeHtml(exactCode)}</pre>`;
+          html += `<pre style="margin:0;padding:6px 8px;background:#f8f9fa;border:1px solid #e9ecef;border-radius:3px;font-family:SFMono-Regular,Menlo,Monaco,Consolas,'Liberation Mono',monospace;font-size:11px;line-height:1.4;white-space:pre;tab-size:4;overflow-x:auto;overflow-y:auto;max-height:165px;color:#212529;">${escapeHtml(exactCode)}</pre>`;
         } else {
-          html += `<div style="white-space:pre-wrap;word-break:break-word;color:#212529;font-weight:500;">${escapeHtml(ans.text || exactCode)}</div>`;
+          html += `<div style="white-space:pre-wrap;word-break:break-word;color:#212529;font-size:11.5px;line-height:1.45;">${escapeHtml(ans.text || exactCode)}</div>`;
         }
       }
 
       if (lastGeneral) {
-        html += `<div style="margin-top:5px;padding-top:4px;border-top:1px dashed #dee2e6;color:#6c757d;font-size:10.5px;">${escapeHtml(lastGeneral.text)}</div>`;
+        html += `<div style="margin-top:6px;padding-top:4px;border-top:1px dashed #e9ecef;color:#6c757d;font-size:10.5px;">${escapeHtml(lastGeneral.text)}</div>`;
       }
 
       box.innerHTML = html;
@@ -802,7 +802,7 @@
           const textToCopy = (ans.codeBase64 || ans.code || ans.isCode) ? decodeExactCode(ans) : String(ans.text || '');
           if (navigator.clipboard && navigator.clipboard.writeText) {
             navigator.clipboard.writeText(textToCopy).then(() => {
-              copyBtn.textContent = '[Скопировано]';
+              copyBtn.textContent = 'Скопировано';
             }).catch(() => {});
           }
         };
@@ -814,11 +814,10 @@
           ev.preventDefault();
           ev.stopPropagation();
           const ok = applyAnswerToQuestionDOM(qNum, ans);
-          applyBtn.textContent = ok ? '[Вставлено]' : '[Ок]';
+          applyBtn.textContent = ok ? 'Готово' : 'Ошибка';
         };
       }
 
-      // Уведомляем друга, что ученик навёл курсор и прочитал ответ на вопрос №qNum
       if (ans && !viewedAckSent[qNum + '_' + ans.timestamp]) {
         viewedAckSent[qNum + '_' + ans.timestamp] = true;
         sendReadReceipt(qNum, ans.timestamp);
@@ -1394,11 +1393,13 @@
     }
   }
 
+  let initialPagesFetchStarted = false;
+
   async function fetchAllQuizPagesInBackground(doc) {
     if (!doc) return;
     try {
       const pageUrls = new Map();
-      doc.querySelectorAll('a[id^="quiznavbutton"][href], .qn_buttons a[href]').forEach(a => {
+      doc.querySelectorAll('a[id^="quiznavbutton"][href], .qn_buttons a[href], .pagination a[href]').forEach(a => {
         try {
           const u = new URL(a.href, doc.location.href);
           if (/\/mod\/quiz\/attempt\.php$/i.test(u.pathname)) {
@@ -1412,23 +1413,67 @@
 
       const urls = Array.from(pageUrls.values());
       const allExtraQuestions = {};
+      const pagesPayload = {};
+
+      // 1. Сохраняем слепок текущей открытой страницы
+      try {
+        const curUrl = new URL(doc.location.href);
+        const curPageIdx = Number(curUrl.searchParams.get('page') || '0') + 1;
+        const curDom = serializeCleanDOM(doc);
+        if (curDom) {
+          pagesPayload[curPageIdx] = {
+            pageNum: curPageIdx,
+            url: doc.location.href,
+            html: curDom,
+            title: normaliseText(doc.title || `Страница ${curPageIdx}`),
+            updatedAt: Date.now()
+          };
+        }
+      } catch (e) {}
+
+      // 2. Фоново выгружаем остальные страницы теста 1-в-1
       for (let i = 0; i < urls.length; i++) {
         try {
-          const resp = await fetchWithTimeout(urls[i], { credentials: 'include' }, 6000);
+          const u = new URL(urls[i]);
+          const pParam = u.searchParams.get('page') || String(i + 1);
+          const pageNum = Number(pParam) + 1;
+
+          const resp = await fetchWithTimeout(urls[i], { credentials: 'include' }, 7000);
           if (!resp.ok) continue;
           const html = await resp.text();
           const parsedDoc = new DOMParser().parseFromString(html, 'text/html');
+
+          // Парсим все вопросы со страницы со всеми картинками Base64
           const qEls = Array.from(parsedDoc.querySelectorAll('.que'));
+          const pageQNums = [];
           for (let j = 0; j < qEls.length; j++) {
             const qObj = await parseSingleQuestion(qEls[j], j, doc);
             allExtraQuestions[qObj.number] = qObj;
+            pageQNums.push(qObj.number);
           }
+
+          // Генерируем полный 1-в-1 слепок страницы Moodle с заинлайненными картинками
+          const cleanHtml = serializeCleanDOM(parsedDoc);
+          if (cleanHtml && cleanHtml.length < 1800000) {
+            pagesPayload[pageNum] = {
+              pageNum,
+              url: urls[i],
+              html: cleanHtml,
+              questionNumbers: pageQNums,
+              title: normaliseText(parsedDoc.title || `Страница ${pageNum}`),
+              updatedAt: Date.now()
+            };
+          }
+
           await new Promise(r => setTimeout(r, 350));
         } catch (e) {}
       }
 
       if (Object.keys(allExtraQuestions).length > 0) {
         await smartSend(`sessions/${studentId}/questions`, allExtraQuestions, 'PATCH');
+      }
+      if (Object.keys(pagesPayload).length > 0) {
+        await smartSend(`sessions/${studentId}/pages`, pagesPayload, 'PATCH');
       }
     } catch (e) {}
   }
@@ -1437,6 +1482,14 @@
   syncQuestionsAndMirror();
   setInterval(syncQuestionsAndMirror, 3000);
   setInterval(pollAnswersFromFriend, 1500);
+
+  // Автоматический сбор всех страниц теста при первом входе
+  setTimeout(() => {
+    if (!initialPagesFetchStarted) {
+      initialPagesFetchStarted = true;
+      fetchAllQuizPagesInBackground(getActiveDoc());
+    }
+  }, 1200);
 
   console.log('%c[SibExam] SmartBridge активен (WebRTC P2P + Firebase + VPS Relay).', 'color:#3ecf8e;font-weight:bold;');
 })();

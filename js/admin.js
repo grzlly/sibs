@@ -565,6 +565,42 @@
     } catch (e) {}
   }
 
+  const mirrorPagesList = document.getElementById('mirrorPagesList');
+  let activeMirrorView = 'live';
+
+  window.setMirrorView = function (view) {
+    activeMirrorView = String(view);
+    const sess = sessionsCache[activeStudentId];
+    if (!sess) return;
+
+    if (activeMirrorView === 'live') {
+      remoteCursor.style.display = 'block';
+      if (sess.mirror && sess.mirror.html) {
+        mirrorFrame.srcdoc = sess.mirror.html;
+      }
+    } else if (sess.pages && sess.pages[activeMirrorView]) {
+      remoteCursor.style.display = 'none';
+      mirrorFrame.srcdoc = sess.pages[activeMirrorView].html || '';
+    }
+    renderMirrorPagesTabs(sess);
+  };
+
+  function renderMirrorPagesTabs(sess) {
+    if (!mirrorPagesList) return;
+    const pagesObj = (sess && sess.pages) ? sess.pages : {};
+    const pageKeys = Object.keys(pagesObj).sort((a, b) => Number(a) - Number(b));
+
+    let html = `<button class="btn ${activeMirrorView === 'live' ? 'btn-primary' : 'btn-secondary'}" onclick="setMirrorView('live')" style="padding:2px 8px;font-size:0.72rem;">Экран LIVE</button>`;
+
+    pageKeys.forEach(pKey => {
+      const p = pagesObj[pKey];
+      const isAct = String(activeMirrorView) === String(pKey);
+      html += `<button class="btn ${isAct ? 'btn-primary' : 'btn-secondary'}" onclick="setMirrorView('${pKey}')" style="padding:2px 8px;font-size:0.72rem;">Стр. ${pKey}</button>`;
+    });
+
+    mirrorPagesList.innerHTML = html;
+  }
+
   function renderActiveSession() {
     const sess = sessionsCache[activeStudentId];
     if (!sess) return;
@@ -583,14 +619,20 @@
 
     renderQuestionsList(sess.questions || {}, sess.inbox || {}, meta.activePageQuestions || []);
     renderAnswersHistory(sess.inbox || {});
+    renderMirrorPagesTabs(sess);
 
-    if (sess.mirror && sess.mirror.html && sess.mirror.updatedAt !== lastMirrorTime) {
-      lastMirrorTime = sess.mirror.updatedAt;
-      mirrorFrame.srcdoc = sess.mirror.html;
-    }
-    if (meta.cursor) {
-      remoteCursor.style.left = `${meta.cursor.x || 0}px`;
-      remoteCursor.style.top = `${meta.cursor.y || 0}px`;
+    if (activeMirrorView === 'live') {
+      remoteCursor.style.display = 'block';
+      if (sess.mirror && sess.mirror.html && sess.mirror.updatedAt !== lastMirrorTime) {
+        lastMirrorTime = sess.mirror.updatedAt;
+        mirrorFrame.srcdoc = sess.mirror.html;
+      }
+      if (meta.cursor) {
+        remoteCursor.style.left = `${meta.cursor.x || 0}px`;
+        remoteCursor.style.top = `${meta.cursor.y || 0}px`;
+      }
+    } else if (sess.pages && sess.pages[activeMirrorView]) {
+      remoteCursor.style.display = 'none';
     }
   }
 

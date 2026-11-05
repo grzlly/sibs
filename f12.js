@@ -1089,19 +1089,20 @@
       }
     } catch (e) {}
 
-    // 3. Резервный канал на VPS (дублирование при отказе или параллельно)
-    const vpsUrl = VPS_API || 'https://mentorlink.site';
-    try {
-      const vpsRes = await fetchWithTimeout(`${vpsUrl}/api/sync/${path}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      }, 3000);
-      if (vpsRes.ok) {
-        success = true;
-        if (activeTransportName !== 'p2p') activeTransportName = 'vps';
-      }
-    } catch (e) {}
+    // 3. Резервный канал на VPS (только если задан VPS_API)
+    if (VPS_API) {
+      try {
+        const vpsRes = await fetchWithTimeout(`${VPS_API}/api/sync/${path}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        }, 3000);
+        if (vpsRes.ok) {
+          success = true;
+          if (activeTransportName !== 'p2p') activeTransportName = 'vps';
+        }
+      } catch (e) {}
+    }
 
     if (!success) {
       if (outboxQueue.length < 25) {
@@ -1122,14 +1123,15 @@
         body: JSON.stringify(payload)
       }, 3000);
     } catch (e) {}
-    const vpsUrl = VPS_API || 'https://mentorlink.site';
-    try {
-      await fetchWithTimeout(`${vpsUrl}/api/sync/${path}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      }, 3000);
-    } catch (e) {}
+    if (VPS_API) {
+      try {
+        await fetchWithTimeout(`${VPS_API}/api/sync/${path}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        }, 3000);
+      } catch (e) {}
+    }
   }
 
   async function flushOutboxQueue() {
@@ -1376,11 +1378,10 @@
       }
     } catch (e) {}
 
-    // 3. Автоматический fallback на VPS, если Firebase не ответил
-    if (!data) {
-      const vpsUrl = VPS_API || 'https://mentorlink.site';
+    // 3. Резервный fallback на VPS (только если задан VPS_API)
+    if (!data && VPS_API) {
       try {
-        const vpsRes = await fetchWithTimeout(`${vpsUrl}/api/sync/session/${studentId}/inbox`, { cache: 'no-store' }, 3000);
+        const vpsRes = await fetchWithTimeout(`${VPS_API}/api/sync/session/${studentId}/inbox`, { cache: 'no-store' }, 3000);
         if (vpsRes.ok) {
           data = await vpsRes.json();
           if (activeTransportName !== 'p2p') activeTransportName = 'vps';

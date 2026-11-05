@@ -2,7 +2,7 @@
   'use strict';
 
   const FB_BASE = 'https://mentorlink-school-default-rtdb.europe-west1.firebasedatabase.app/messages/sib_exam';
-  const VPS_BASE = 'https://mentorlink.site';
+  const VPS_BASE = window.__SIB_VPS_URL || '';
 
   // Иконки из D:\tabler-icons-3.50.0 (outline)
   const ICONS = {

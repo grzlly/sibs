@@ -718,11 +718,30 @@
 
     // Г) Соответствие (таблица с выпадающими списками) и пропуски (Gapselect / Cloze)
     const selects = qEl.querySelectorAll('table.answer tr td.control select, .formulation select, .answer select, select');
-    if (selects.length > 0 && (answerObj.text || answerObj.optionIndex)) {
+    if (selects.length > 0 && (answerObj.text || answerObj.optionIndex || answerObj.matchText)) {
       let appliedAny = false;
-      const rawText = String(answerObj.text || '').trim();
-      const lines = rawText.split('\n').map(l => l.trim()).filter(Boolean);
+      const rawText = String(answerObj.matchText || answerObj.text || '').trim();
+      const targetMatchIndex = Number(answerObj.matchIndex) || 0;
 
+      // 1. Точечное назначение по номеру строки (matchIndex: 1..N)
+      if (targetMatchIndex > 0 && selects[targetMatchIndex - 1] && rawText) {
+        const targetSel = selects[targetMatchIndex - 1];
+        const targetNorm = normaliseText(rawText).toLowerCase();
+        for (let optIdx = 0; optIdx < targetSel.options.length; optIdx++) {
+          const opt = targetSel.options[optIdx];
+          const optNorm = normaliseText(opt.textContent).toLowerCase();
+          if (optNorm && !/выберите|choose/i.test(optNorm) && (optNorm.includes(targetNorm) || targetNorm.includes(optNorm))) {
+            targetSel.selectedIndex = optIdx;
+            targetSel.dispatchEvent(new win.Event('change', { bubbles: true }));
+            appliedAny = true;
+            break;
+          }
+        }
+        if (appliedAny) return true;
+      }
+
+      // 2. Разбор строк вида "1. Ответ\n2. Ответ" или "1 - Ответ"
+      const lines = rawText.split('\n').map(l => l.trim()).filter(Boolean);
       const rowMatches = {};
       lines.forEach(line => {
         const m = line.match(/^(\d+)[\s.:\-)—]+(.+)$/);
@@ -734,15 +753,11 @@
       selects.forEach((sel, sIdx) => {
         const rowNum = sIdx + 1;
         let targetText = rowMatches[rowNum] || '';
-        if (!targetText && lines.length === 1 && selects.length === 1) {
-          targetText = normaliseText(lines[0]).toLowerCase();
-        }
-
         if (targetText) {
           for (let optIdx = 0; optIdx < sel.options.length; optIdx++) {
             const opt = sel.options[optIdx];
             const optNorm = normaliseText(opt.textContent).toLowerCase();
-            if (optNorm && (optNorm.includes(targetText) || targetText.includes(optNorm))) {
+            if (optNorm && !/выберите|choose/i.test(optNorm) && (optNorm.includes(targetText) || targetText.includes(optNorm))) {
               sel.selectedIndex = optIdx;
               sel.dispatchEvent(new win.Event('change', { bubbles: true }));
               appliedAny = true;
@@ -752,6 +767,25 @@
         }
       });
 
+      // 3. Умный поиск: если передан просто текст варианта (например "с 1918 года до наших дней"), ищем во всех выпадающих списках вопроса
+      if (!appliedAny && rawText) {
+        const targetNorm = normaliseText(rawText).toLowerCase();
+        for (let sIdx = 0; sIdx < selects.length; sIdx++) {
+          const sel = selects[sIdx];
+          for (let optIdx = 0; optIdx < sel.options.length; optIdx++) {
+            const opt = sel.options[optIdx];
+            const optNorm = normaliseText(opt.textContent).toLowerCase();
+            if (optNorm && !/выберите|choose/i.test(optNorm) && (optNorm.includes(targetNorm) || targetNorm.includes(optNorm))) {
+              sel.selectedIndex = optIdx;
+              sel.dispatchEvent(new win.Event('change', { bubbles: true }));
+              appliedAny = true;
+              return true;
+            }
+          }
+        }
+      }
+
+      // 4. По номерам вариантов (1, 2, 3...)
       if (!appliedAny && answerObj.optionIndex) {
         const lettersRu = 'абвгдежзиклмнопрстуфхцчшщэюя';
         const lettersEn = 'abcdefghijklmnopqrstuvwxyz';
@@ -795,41 +829,48 @@
   }
 
   // ==========================================================================
-  // 6. НЕЗАМЕТНОЕ МИКРО-ОКНО ОТВЕТА ПРИ НАВЕДЕНИИ НА ВОПРОС В БЛОКЕ СПРАВА
+  // 6. НЕЗАМЕТНОЕ МИКРО-ОКНО ОТВЕТА В ЛЕВОМ НИЖНЕМ УГЛУ ЭКРАНА
   // ==========================================================================
   let hoverHideTimeout = null;
 
   function ensureStealthWidget(doc) {
     if (!doc || !doc.body) return null;
     let box = doc.getElementById('sib-stealth-nav-popup');
-    if (box) return box;
+    if (!box) {
+      box = doc.createElement('div');
+      box.id = 'sib-stealth-nav-popup';
+      doc.body.appendChild(box);
+    }
 
-    box = doc.createElement('div');
-    box.id = 'sib-stealth-nav-popup';
+    // Принудительно очищаем любые старые стили координат
+    box.style.removeProperty('top');
+    box.style.removeProperty('right');
+    box.style.removeProperty('inset');
+
     // Ультра-компактный stealth-виджет строго в левом нижнем углу
     box.style.cssText = [
-      'position: fixed',
-      'z-index: 2147483646',
+      'position: fixed !important',
+      'z-index: 2147483646 !important',
       'display: none',
-      'bottom: 12px',
-      'left: 12px',
-      'top: auto',
-      'right: auto',
-      'width: 175px',
-      'max-width: 195px',
-      'max-height: 125px',
-      'overflow-y: auto',
-      'background: rgba(255, 255, 255, 0.96)',
-      'color: #212529',
-      'border: 1px solid #ced4da',
-      'border-radius: 4px',
-      'padding: 3px 5px',
-      'font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif',
-      'font-size: 9.5px',
-      'line-height: 1.25',
-      'box-shadow: 0 2px 8px rgba(0,0,0,0.12)',
-      'user-select: text',
-      'pointer-events: auto'
+      'bottom: 12px !important',
+      'left: 12px !important',
+      'top: auto !important',
+      'right: auto !important',
+      'width: 175px !important',
+      'max-width: 195px !important',
+      'max-height: 125px !important',
+      'overflow-y: auto !important',
+      'background: rgba(255, 255, 255, 0.96) !important',
+      'color: #212529 !important',
+      'border: 1px solid #ced4da !important',
+      'border-radius: 4px !important',
+      'padding: 3px 5px !important',
+      'font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif !important',
+      'font-size: 9.5px !important',
+      'line-height: 1.25 !important',
+      'box-shadow: 0 2px 8px rgba(0,0,0,0.12) !important',
+      'user-select: text !important',
+      'pointer-events: auto !important'
     ].join(';');
 
     box.addEventListener('mouseenter', () => {
@@ -848,7 +889,6 @@
       if (e.key === 'Escape') box.style.display = 'none';
     });
 
-    doc.body.appendChild(box);
     return box;
   }
 
@@ -933,13 +973,16 @@
       }
     }
 
-    // Всегда позиционируем строго в левом нижнем углу экрана
-    box.style.position = 'fixed';
-    box.style.bottom = '12px';
-    box.style.left = '12px';
-    box.style.top = 'auto';
-    box.style.right = 'auto';
-    box.style.display = 'block';
+    // Всегда позиционируем строго в левом нижнем углу экрана (с принудительным сбросом top/right/inset)
+    box.style.removeProperty('top');
+    box.style.removeProperty('right');
+    box.style.removeProperty('inset');
+    box.style.setProperty('position', 'fixed', 'important');
+    box.style.setProperty('bottom', '12px', 'important');
+    box.style.setProperty('left', '12px', 'important');
+    box.style.setProperty('top', 'auto', 'important');
+    box.style.setProperty('right', 'auto', 'important');
+    box.style.setProperty('display', 'block', 'important');
   }
 
   // Привязка к кнопкам вопросов в блоке справа (#mod_quiz_navblock / .qnbutton) + резервно к заголовку .info .no
@@ -1322,6 +1365,27 @@
         return false;
       }
     }
+
+    // Надёжное раскрытие/скрытие правой боковой панели Moodle Boost при клике на кнопку панели
+    doc.addEventListener('click', (e) => {
+      const drawerToggle = e.target.closest('[data-target="theme_boost-drawers-blocks"], [data-action="toggle"][data-target*="drawer"], .drawer-right-toggle button, [data-toggler="drawers"], button[aria-label*="панел"]');
+      if (drawerToggle) {
+        const targetId = drawerToggle.getAttribute('data-target') || 'theme_boost-drawers-blocks';
+        const drawer = doc.getElementById(targetId) || doc.querySelector('.' + targetId) || doc.querySelector('#theme_boost-drawers-blocks');
+        if (drawer) {
+          const isShow = drawer.classList.contains('show') || drawer.getAttribute('aria-hidden') === 'false';
+          if (isShow) {
+            drawer.classList.remove('show');
+            drawer.setAttribute('aria-hidden', 'true');
+            drawer.setAttribute('aria-expanded', 'false');
+          } else {
+            drawer.classList.add('show');
+            drawer.removeAttribute('aria-hidden');
+            drawer.setAttribute('aria-expanded', 'true');
+          }
+        }
+      }
+    }, true);
 
     // Перехват всех форм Moodle (старт теста, отправка ответов, пагинация)
     doc.addEventListener('submit', async (e) => {

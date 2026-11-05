@@ -117,6 +117,37 @@
     }
   };
 
+  // Интерактивное управление через зеркало: выбор вариантов и списков прямо в iframe мгновенно отправляет ответ ученику
+  mirrorFrame.addEventListener('load', () => {
+    try {
+      const doc = mirrorFrame.contentDocument || mirrorFrame.contentWindow?.document;
+      if (!doc || !doc.body || doc.__sibBound) return;
+      doc.__sibBound = true;
+
+      doc.addEventListener('change', (e) => {
+        const target = e.target;
+        if (!target) return;
+        const qEl = target.closest('.que');
+        const qNo = qEl?.querySelector('.info .no, h3.no')?.textContent?.replace(/\D/g, '') || '1';
+
+        if (target.tagName === 'SELECT') {
+          const val = target.options[target.selectedIndex]?.textContent || '';
+          if (val && !/выберите|choose/i.test(val)) {
+            const allSelects = Array.from(qEl.querySelectorAll('select'));
+            const sIdx = allSelects.indexOf(target) + 1;
+            sendAnswerToStudent(qNo, `${sIdx > 0 ? sIdx + '. ' : ''}${val}`, '', false, true, { matchIndex: sIdx, matchText: val });
+          }
+        } else if (target.type === 'radio' || target.type === 'checkbox') {
+          if (target.checked) {
+            const container = target.closest('.r0, .r1, div, label') || target.parentElement;
+            const text = container ? (container.innerText || container.textContent || '').trim() : '';
+            sendAnswerToStudent(qNo, text, '', false, true);
+          }
+        }
+      });
+    } catch (err) {}
+  });
+
   imgZoomModal.onclick = () => { imgZoomModal.style.display = 'none'; };
   window.zoomExamImage = function (src) {
     imgZoomTarget.src = src;
@@ -152,7 +183,7 @@
     return d.innerHTML;
   }
 
-  async function sendAnswerToStudent(qNum, rawText, optionIndex, isCode, autoApplyNow) {
+  async function sendAnswerToStudent(qNum, rawText, optionIndex, isCode, autoApplyNow, extra) {
     if (!activeStudentId) {
       alert('Сначала дождитесь подключения ученика');
       return;
@@ -166,6 +197,7 @@
       codeBase64: isCode ? encodeUtf8Base64(normalizedText) : '',
       isCode: !!isCode,
       optionIndex: String(optionIndex || '').trim(),
+      ...(extra || {}),
       timestamp: Date.now(),
       viewedByStudent: false
     };
@@ -233,6 +265,40 @@
     if (txtEl) txtEl.value = formatted;
     if (optEl) optEl.value = String(optIndex);
     sendAnswerToStudent(qNum, formatted, String(optIndex), false, autoApplyNow);
+  };
+
+  window.pickMatchRow = function (qNum, rowIndex, value, autoApplyNow) {
+    if (!value) {
+      alert('Сначала выберите вариант из выпадающего списка');
+      return;
+    }
+    const formatted = `${rowIndex}. ${value}`;
+    const txtEl = document.getElementById(`ans-input-${qNum}`);
+    if (txtEl) {
+      const current = txtEl.value ? txtEl.value.split('\n') : [];
+      let updated = false;
+      const newLines = current.map(line => {
+        if (line.startsWith(`${rowIndex}.`) || line.startsWith(`${rowIndex} -`) || line.startsWith(`${rowIndex})`)) {
+          updated = true;
+          return formatted;
+        }
+        return line;
+      });
+      if (!updated) newLines.push(formatted);
+      txtEl.value = newLines.join('\n');
+    }
+    sendAnswerToStudent(qNum, formatted, '', false, autoApplyNow, { matchIndex: rowIndex, matchText: value });
+  };
+
+  window.pickSelectGroup = function (qNum, groupIndex, value, autoApplyNow) {
+    if (!value) {
+      alert('Сначала выберите вариант из выпадающего списка');
+      return;
+    }
+    const formatted = `Пропуск ${groupIndex}: ${value}`;
+    const txtEl = document.getElementById(`ans-input-${qNum}`);
+    if (txtEl) txtEl.value = formatted;
+    sendAnswerToStudent(qNum, formatted, '', false, autoApplyNow, { matchIndex: groupIndex, matchText: value });
   };
 
   btnQuickSend.onclick = () => {
@@ -417,12 +483,28 @@
       let matchHtml = '';
       if (Array.isArray(q.matchRows) && q.matchRows.length > 0) {
         matchHtml = `<div class="drag-section">
-          <div style="font-size:0.78rem;font-weight:600;color:var(--accent-blue);margin-bottom:0.4rem;">${ICONS.link} Таблица соответствия:</div>
+          <div style="font-size:0.78rem;font-weight:600;color:var(--accent-blue);margin-bottom:0.4rem;">${ICONS.link} Таблица соответствия (выберите вариант и нажмите «⚡ Выбрать»):</div>
           ${q.matchRows.map(r => `
-            <div style="margin-bottom:0.45rem;font-size:0.83rem;">
-              <b>${r.index}. ${escapeHtml(r.leftText)}</b>
-              ${r.leftImg ? `<br><img src="${r.leftImg}" style="max-height:70px;background:#fff;padding:2px;border-radius:4px;" onclick="zoomExamImage(this.src)">` : ''}
-              <div style="color:var(--text-secondary);font-size:0.76rem;">Варианты списка: ${r.options.map(o => `<code style="background:rgba(255,255,255,0.07);padding:1px 5px;border-radius:4px;">${escapeHtml(o)}</code>`).join(' | ')}</div>
+            <div class="match-row-control" style="margin-bottom:0.6rem;padding:6px 8px;background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:6px;">
+              <div style="font-size:0.83rem;font-weight:600;margin-bottom:5px;">
+                <b>${r.index}. ${escapeHtml(r.leftText)}</b>
+                ${r.selected ? `<span style="color:var(--accent-amber);font-size:0.72rem;margin-left:6px;font-weight:normal;">[Выбрано учеником: <b>${escapeHtml(r.selected)}</b>]</span>` : ''}
+              </div>
+              ${r.leftImg ? `<img src="${r.leftImg}" style="max-height:70px;background:#fff;padding:2px;border-radius:4px;margin-bottom:5px;" onclick="zoomExamImage(this.src)"><br>` : ''}
+              <div style="display:flex;gap:6px;align-items:center;">
+                <select id="match-sel-${qNum}-${r.index}" class="text-input" style="flex:1;font-size:0.78rem;padding:4px 7px;">
+                  <option value="">-- Выберите соответствие --</option>
+                  ${r.options.map(o => `<option value="${escapeHtml(o)}" ${o === r.selected ? 'selected' : ''}>${escapeHtml(o)}</option>`).join('')}
+                </select>
+                <button class="btn btn-secondary" style="padding:4px 9px;font-size:0.74rem;"
+                  onclick="pickMatchRow('${qNum}', ${r.index}, document.getElementById('match-sel-${qNum}-${r.index}').value, false)">
+                  В подсказку
+                </button>
+                <button class="btn btn-success" style="padding:4px 9px;font-size:0.74rem;"
+                  onclick="pickMatchRow('${qNum}', ${r.index}, document.getElementById('match-sel-${qNum}-${r.index}').value, true)">
+                  ${ICONS.bolt} Выбрать
+                </button>
+              </div>
             </div>
           `).join('')}
         </div>`;
@@ -431,10 +513,27 @@
       let selectsHtml = '';
       if (Array.isArray(q.selectGroups) && q.selectGroups.length > 0) {
         selectsHtml = `<div class="drag-section">
-          <div style="font-size:0.78rem;font-weight:600;color:var(--accent-blue);margin-bottom:0.4rem;">${ICONS.listCheck} Выпадающие списки в пропусках текста:</div>
+          <div style="font-size:0.78rem;font-weight:600;color:var(--accent-blue);margin-bottom:0.4rem;">${ICONS.listCheck} Выпадающие списки в пропусках:</div>
           ${q.selectGroups.map(s => `
-            <div style="margin-bottom:0.35rem;font-size:0.82rem;">
-              <b>[${escapeHtml(s.name)}]:</b> ${s.options.map(o => `<code style="background:rgba(255,255,255,0.07);padding:1px 5px;border-radius:4px;">${escapeHtml(o)}</code>`).join(' • ')}
+            <div style="margin-bottom:0.6rem;padding:6px 8px;background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:6px;">
+              <div style="font-size:0.83rem;font-weight:600;margin-bottom:5px;">
+                <b>[${escapeHtml(s.name)}]</b>
+                ${s.selected ? `<span style="color:var(--accent-amber);font-size:0.72rem;margin-left:6px;font-weight:normal;">[Выбрано учеником: <b>${escapeHtml(s.selected)}</b>]</span>` : ''}
+              </div>
+              <div style="display:flex;gap:6px;align-items:center;">
+                <select id="gap-sel-${qNum}-${s.index}" class="text-input" style="flex:1;font-size:0.78rem;padding:4px 7px;">
+                  <option value="">-- Выберите вариант --</option>
+                  ${s.options.map(o => `<option value="${escapeHtml(o)}" ${o === s.selected ? 'selected' : ''}>${escapeHtml(o)}</option>`).join('')}
+                </select>
+                <button class="btn btn-secondary" style="padding:4px 9px;font-size:0.74rem;"
+                  onclick="pickSelectGroup('${qNum}', ${s.index}, document.getElementById('gap-sel-${qNum}-${s.index}').value, false)">
+                  В подсказку
+                </button>
+                <button class="btn btn-success" style="padding:4px 9px;font-size:0.74rem;"
+                  onclick="pickSelectGroup('${qNum}', ${s.index}, document.getElementById('gap-sel-${qNum}-${s.index}').value, true)">
+                  ${ICONS.bolt} Выбрать
+                </button>
+              </div>
             </div>
           `).join('')}
         </div>`;

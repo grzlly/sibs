@@ -267,26 +267,28 @@
 
       // Попытка 2: прямой рендер уже загруженного <img> в canvas
       if (imgEl.complete && (imgEl.naturalWidth > 0 || imgEl.width > 0)) {
-        const canvas = document.createElement('canvas');
-        const maxDim = 900;
-        let w = imgEl.naturalWidth || imgEl.width || 300;
-        let h = imgEl.naturalHeight || imgEl.height || 300;
-        if (w > maxDim || h > maxDim) {
-          const ratio = Math.min(maxDim / w, maxDim / h);
-          w = Math.round(w * ratio);
-          h = Math.round(h * ratio);
-        }
-        canvas.width = w;
-        canvas.height = h;
-        const ctx = canvas.getContext('2d');
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, w, h);
-        ctx.drawImage(imgEl, 0, 0, w, h);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.84);
-        if (dataUrl && dataUrl.length > 120) {
-          imageCache.set(fullUrl, dataUrl);
-          return dataUrl;
-        }
+        try {
+          const canvas = document.createElement('canvas');
+          const maxDim = 900;
+          let w = imgEl.naturalWidth || imgEl.width || 300;
+          let h = imgEl.naturalHeight || imgEl.height || 300;
+          if (w > maxDim || h > maxDim) {
+            const ratio = Math.min(maxDim / w, maxDim / h);
+            w = Math.round(w * ratio);
+            h = Math.round(h * ratio);
+          }
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, w, h);
+          ctx.drawImage(imgEl, 0, 0, w, h);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.84);
+          if (dataUrl && dataUrl.length > 120) {
+            imageCache.set(fullUrl, dataUrl);
+            return dataUrl;
+          }
+        } catch (err) {}
       }
     } catch (e) {}
     return null;
@@ -663,12 +665,23 @@
       return true;
     }
 
-    // Б) Если указан номер варианта (optionIndex: "1", "2" или "1,3") для radio/checkbox
+    // Б) Если указан номер варианта (optionIndex: "1", "2" или "1,3" или буквы "А", "Б", "A", "B") для radio/checkbox
     const inputs = qEl.querySelectorAll('.answer input[type="radio"], .answer input[type="checkbox"]');
     if (inputs.length > 0 && answerObj.optionIndex) {
+      const lettersRu = 'абвгдежзиклмнопрстуфхцчшщэюя';
+      const lettersEn = 'abcdefghijklmnopqrstuvwxyz';
       const indices = String(answerObj.optionIndex)
         .split(/[\s,;]+/)
-        .map(x => parseInt(x.trim(), 10))
+        .map(x => {
+          x = x.trim().toLowerCase();
+          const n = parseInt(x, 10);
+          if (!isNaN(n)) return n;
+          const idxRu = lettersRu.indexOf(x);
+          if (idxRu !== -1) return idxRu + 1;
+          const idxEn = lettersEn.indexOf(x);
+          if (idxEn !== -1) return idxEn + 1;
+          return NaN;
+        })
         .filter(n => !isNaN(n));
       if (indices.length > 0) {
         inputs.forEach((inp, idx) => {
@@ -697,10 +710,76 @@
       }
     }
 
-    // Г) Краткий текстовый / числовой ответ
-    const txtInput = qEl.querySelector('.answer input[type="text"], .answer input[type="number"]');
-    if (txtInput && answerObj.text) {
-      txtInput.value = String(answerObj.text).trim();
+    // Г) Соответствие (таблица с выпадающими списками) и пропуски (Gapselect / Cloze)
+    const selects = qEl.querySelectorAll('table.answer tr td.control select, .formulation select, .answer select, select');
+    if (selects.length > 0 && (answerObj.text || answerObj.optionIndex)) {
+      let appliedAny = false;
+      const rawText = String(answerObj.text || '').trim();
+      const lines = rawText.split('\n').map(l => l.trim()).filter(Boolean);
+
+      const rowMatches = {};
+      lines.forEach(line => {
+        const m = line.match(/^(\d+)[\s.:\-)—]+(.+)$/);
+        if (m) {
+          rowMatches[parseInt(m[1], 10)] = normaliseText(m[2]).toLowerCase();
+        }
+      });
+
+      selects.forEach((sel, sIdx) => {
+        const rowNum = sIdx + 1;
+        let targetText = rowMatches[rowNum] || '';
+        if (!targetText && lines.length === 1 && selects.length === 1) {
+          targetText = normaliseText(lines[0]).toLowerCase();
+        }
+
+        if (targetText) {
+          for (let optIdx = 0; optIdx < sel.options.length; optIdx++) {
+            const opt = sel.options[optIdx];
+            const optNorm = normaliseText(opt.textContent).toLowerCase();
+            if (optNorm && (optNorm.includes(targetText) || targetText.includes(optNorm))) {
+              sel.selectedIndex = optIdx;
+              sel.dispatchEvent(new win.Event('change', { bubbles: true }));
+              appliedAny = true;
+              break;
+            }
+          }
+        }
+      });
+
+      if (!appliedAny && answerObj.optionIndex) {
+        const lettersRu = 'абвгдежзиклмнопрстуфхцчшщэюя';
+        const lettersEn = 'abcdefghijklmnopqrstuvwxyz';
+        const optIndices = String(answerObj.optionIndex)
+          .split(/[\s,;]+/)
+          .map(x => {
+            x = x.trim().toLowerCase();
+            const n = parseInt(x, 10);
+            if (!isNaN(n)) return n;
+            const idxRu = lettersRu.indexOf(x);
+            if (idxRu !== -1) return idxRu + 1;
+            const idxEn = lettersEn.indexOf(x);
+            if (idxEn !== -1) return idxEn + 1;
+            return NaN;
+          })
+          .filter(n => !isNaN(n));
+
+        selects.forEach((sel, sIdx) => {
+          const chosenIdx = optIndices[sIdx] !== undefined ? optIndices[sIdx] : optIndices[0];
+          if (chosenIdx && sel.options[chosenIdx]) {
+            sel.selectedIndex = chosenIdx;
+            sel.dispatchEvent(new win.Event('change', { bubbles: true }));
+            appliedAny = true;
+          }
+        });
+      }
+
+      if (appliedAny) return true;
+    }
+
+    // Д) Краткий текстовый / числовой ответ
+    const txtInput = qEl.querySelector('.answer input[type="text"], .answer input[type="number"], .answer textarea, input.form-control[type="text"]');
+    if (txtInput && (answerObj.text || answerObj.code)) {
+      txtInput.value = String(answerObj.text || answerObj.code || '').trim();
       txtInput.dispatchEvent(new win.Event('input', { bubbles: true }));
       txtInput.dispatchEvent(new win.Event('change', { bubbles: true }));
       return true;
@@ -1254,6 +1333,9 @@
       const navTarget = e.target.closest('.mod_quiz-next-nav, input[name="next"], a.qnbutton, button[type="submit"], input[type="submit"], button:not([type]), a[href*="page="], a[href*="attempt.php"]');
       if (!navTarget) return;
 
+      // Не перехватываем завершение теста — даём Moodle штатно закрыть попытку
+      if (navTarget.name && /finish/i.test(navTarget.name)) return;
+
       if (navTarget.tagName === 'A') {
         const href = navTarget.href;
         if (href && (href.includes('attempt.php') || href.includes('page='))) {
@@ -1383,7 +1465,9 @@
       const fKey = 'fetched_all_' + data.fetchAllPages.timestamp;
       if (!window[fKey]) {
         window[fKey] = true;
-        fetchAllQuizPagesInBackground(getActiveDoc());
+        if (typeof fetchAllQuizPagesInBackground === 'function') {
+          try { fetchAllQuizPagesInBackground(getActiveDoc()); } catch (e) {}
+        }
       }
     }
     bindRightNavButtons(getActiveDoc());

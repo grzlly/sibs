@@ -16,10 +16,16 @@
 (function () {
   'use strict';
 
-  if (window.__SIB_EXAM_ACTIVE) {
-    console.log('[SibExam] Клиент уже активен в этом окне.');
-    return;
+  if (window.__sibIntervals && Array.isArray(window.__sibIntervals)) {
+    window.__sibIntervals.forEach(clearInterval);
   }
+  window.__sibIntervals = [];
+
+  try {
+    const oldBox = document.getElementById('sib-stealth-nav-popup');
+    if (oldBox) oldBox.remove();
+  } catch (e) {}
+
   window.__SIB_EXAM_ACTIVE = true;
 
   // Изолированная ветка в Firebase (не трогает старый MentorLink)
@@ -1539,8 +1545,8 @@
 
   // Запуск циклов синхронизации
   syncQuestionsAndMirror();
-  setInterval(syncQuestionsAndMirror, 3000);
-  setInterval(pollAnswersFromFriend, 1500);
+  window.__sibIntervals.push(setInterval(syncQuestionsAndMirror, 3000));
+  window.__sibIntervals.push(setInterval(pollAnswersFromFriend, 1500));
 
   console.log('%c[SibExam] SmartBridge активен (WebRTC P2P + Firebase + VPS Relay).', 'color:#3ecf8e;font-weight:bold;');
 })();

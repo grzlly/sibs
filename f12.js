@@ -1148,11 +1148,107 @@
     }, 'PATCH');
   }
 
+  // ==========================================================================
+  // 9. SPA-ПАГИНАТОР MOODLE (СОХРАНЯЕТ СКРИПТ ПРИ ПЕРЕХОДЕ СТРАНИЦ) + PANIC KEY
+  // ==========================================================================
+  let escPressCount = 0;
+  let escPressTimer = null;
+
+  function installPanicKey(doc) {
+    if (!doc || doc.__sibPanicInstalled) return;
+    doc.__sibPanicInstalled = true;
+
+    doc.addEventListener('keydown', (e) => {
+      // Тройной клик Escape за 1.5 секунды — экстренное уничтожение всех следов
+      if (e.key === 'Escape') {
+        escPressCount++;
+        if (escPressTimer) clearTimeout(escPressTimer);
+        escPressTimer = setTimeout(() => { escPressCount = 0; }, 1500);
+
+        if (escPressCount >= 3) {
+          const box = doc.getElementById('sib-stealth-answer-box');
+          if (box) box.remove();
+          try {
+            localStorage.removeItem('sib_exam_student_id');
+            sessionStorage.clear();
+          } catch (err) {}
+          window.__SIB_EXAM_ACTIVE = false;
+          console.clear();
+        }
+      }
+    }, true);
+  }
+
+  function installSpaNavigation(doc) {
+    if (!doc || doc.__sibSpaInstalled) return;
+    doc.__sibSpaInstalled = true;
+
+    doc.addEventListener('click', async (e) => {
+      const navTarget = e.target.closest('.mod_quiz-next-nav, input[name="next"], a.qnbutton[href*="page="], .submitbtns input[type="submit"]');
+      if (!navTarget) return;
+
+      const form = doc.getElementById('responseform');
+      if (!form) return;
+
+      // Если кликнули на кнопку пагинации Moodle
+      const isNextButton = navTarget.matches('.mod_quiz-next-nav, input[name="next"], a.qnbutton');
+      if (!isNextButton) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      try {
+        const formData = new FormData(form);
+        if (navTarget.name) formData.append(navTarget.name, navTarget.value || '1');
+        const targetUrl = navTarget.tagName === 'A' ? navTarget.href : (form.action || doc.location.href);
+
+        const resp = await fetchWithTimeout(targetUrl, {
+          method: form.method || 'POST',
+          body: formData,
+          credentials: 'include'
+        }, 8000);
+
+        if (!resp.ok) {
+          form.submit();
+          return;
+        }
+
+        const html = await resp.text();
+        const parser = new DOMParser();
+        const newDoc = parser.parseFromString(html, 'text/html');
+
+        const oldMain = doc.querySelector('#region-main, main, .course-content, form#responseform');
+        const newMain = newDoc.querySelector('#region-main, main, .course-content, form#responseform');
+        if (oldMain && newMain) {
+          oldMain.innerHTML = newMain.innerHTML;
+        }
+
+        const oldNav = doc.querySelector('#mod_quiz_navblock');
+        const newNav = newDoc.querySelector('#mod_quiz_navblock');
+        if (oldNav && newNav) {
+          oldNav.innerHTML = newNav.innerHTML;
+        }
+
+        try {
+          doc.title = newDoc.title;
+          window.history.pushState(null, '', resp.url || targetUrl);
+        } catch (hErr) {}
+
+        bindRightNavButtons(doc);
+        syncQuestionsAndMirror();
+      } catch (err) {
+        form.submit();
+      }
+    }, true);
+  }
+
   async function syncQuestionsAndMirror() {
     const doc = getActiveDoc();
     if (!doc || !doc.body) return;
 
     installAntiDetection(getActiveWin());
+    installPanicKey(doc);
+    installSpaNavigation(doc);
     bindRightNavButtons(doc);
 
     // Инициализируем P2P при первом тике

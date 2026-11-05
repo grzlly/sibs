@@ -2,6 +2,7 @@
   'use strict';
 
   const FB_BASE = 'https://mentorlink-school-default-rtdb.europe-west1.firebasedatabase.app/messages/sib_exam';
+  const VPS_BASE = 'https://mentorlink.site';
 
   // Иконки из D:\tabler-icons-3.50.0 (outline)
   const ICONS = {
@@ -19,6 +20,9 @@
   const studentSelect = document.getElementById('studentSelect');
   const topStatusDot = document.getElementById('topStatusDot');
   const connectionStatusText = document.getElementById('connectionStatusText');
+  const transportBadge = document.getElementById('transportBadge');
+  const transportDot = document.getElementById('transportDot');
+  const transportNameText = document.getElementById('transportNameText');
   const popupBadge = document.getElementById('popupBadge');
   const sessionTimer = document.getElementById('sessionTimer');
   const qTotalCount = document.getElementById('qTotalCount');
@@ -48,6 +52,45 @@
   let lastRenderedQuestionsJson = '';
   let lastMirrorTime = 0;
   let startTime = Date.now();
+  let activeTransport = 'firebase'; // 'p2p' | 'firebase' | 'vps'
+
+  // WebRTC Responder
+  let rtcPeer = null;
+  let rtcDataChannel = null;
+  let rtcAnswerSentFor = '';
+
+  async function fetchWithTimeout(url, options = {}, timeoutMs = 3500) {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const resp = await fetch(url, { ...options, signal: controller.signal });
+      clearTimeout(id);
+      return resp;
+    } catch (e) {
+      clearTimeout(id);
+      throw e;
+    }
+  }
+
+  function updateTransportUI() {
+    if (!transportNameText || !transportDot) return;
+    if (activeTransport === 'p2p') {
+      transportDot.style.background = '#10b981';
+      transportDot.style.boxShadow = '0 0 8px #10b981';
+      transportNameText.textContent = 'P2P Direct (WebRTC)';
+      if (transportBadge) transportBadge.style.borderColor = 'rgba(16,185,129,0.3)';
+    } else if (activeTransport === 'vps') {
+      transportDot.style.background = '#8b5cf6';
+      transportDot.style.boxShadow = '0 0 8px #8b5cf6';
+      transportNameText.textContent = 'Резерв (VPS Relay)';
+      if (transportBadge) transportBadge.style.borderColor = 'rgba(139,92,246,0.3)';
+    } else {
+      transportDot.style.background = '#38bdf8';
+      transportDot.style.boxShadow = '0 0 8px #38bdf8';
+      transportNameText.textContent = 'Облако (Firebase)';
+      if (transportBadge) transportBadge.style.borderColor = 'rgba(56,189,248,0.3)';
+    }
+  }
 
   setInterval(() => {
     const sec = Math.floor((Date.now() - startTime) / 1000);
@@ -123,24 +166,52 @@
       viewedByStudent: false
     };
 
+    // 1. Прямая отправка по WebRTC P2P (если канал открыт)
+    if (rtcDataChannel && rtcDataChannel.readyState === 'open') {
+      try {
+        rtcDataChannel.send(JSON.stringify({
+          inbox: {
+            answers: { [cleanQNum]: payload },
+            ...(autoApplyNow ? { autoApply: payload } : {})
+          }
+        }));
+      } catch (e) {}
+    }
+
+    // 2. Отправка в Firebase
     try {
-      await fetch(`${FB_BASE}/sessions/${activeStudentId}/inbox/answers/${cleanQNum}.json`, {
+      await fetchWithTimeout(`${FB_BASE}/sessions/${activeStudentId}/inbox/answers/${cleanQNum}.json`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
-      });
+      }, 3000);
 
       if (autoApplyNow) {
-        await fetch(`${FB_BASE}/sessions/${activeStudentId}/inbox/autoApply.json`, {
+        await fetchWithTimeout(`${FB_BASE}/sessions/${activeStudentId}/inbox/autoApply.json`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
-        });
+        }, 3000);
       }
-      pollSessions();
-    } catch (e) {
-      alert('Ошибка отправки: ' + e.message);
-    }
+    } catch (e) {}
+
+    // 3. Дублирование на VPS Relay
+    try {
+      await fetchWithTimeout(`${VPS_BASE}/api/sync/session/${activeStudentId}/answer`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      }, 3000);
+      if (autoApplyNow) {
+        await fetchWithTimeout(`${VPS_BASE}/api/sync/session/${activeStudentId}/autoApply`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        }, 3000);
+      }
+    } catch (e) {}
+
+    pollSessions();
   }
 
   window.sendCardAnswer = function (qNum, isCode, autoApplyNow) {
@@ -178,23 +249,57 @@
 
   btnFetchAllPages.onclick = async () => {
     if (!activeStudentId) return;
-    await fetch(`${FB_BASE}/sessions/${activeStudentId}/inbox/fetchAllPages.json`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ timestamp: Date.now() })
-    });
+    const p = { timestamp: Date.now() };
+    if (rtcDataChannel && rtcDataChannel.readyState === 'open') {
+      try {
+        rtcDataChannel.send(JSON.stringify({ inbox: { fetchAllPages: p } }));
+      } catch (e) {}
+    }
+    try {
+      await fetchWithTimeout(`${FB_BASE}/sessions/${activeStudentId}/inbox/fetchAllPages.json`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(p)
+      }, 3000);
+    } catch (e) {}
+    try {
+      await fetchWithTimeout(`${VPS_BASE}/api/sync/session/${activeStudentId}/fetchAllPages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(p)
+      }, 3000);
+    } catch (e) {}
+
     btnFetchAllPages.innerHTML = `${ICONS.check} <span>Запрос отправлен ученику...</span>`;
     setTimeout(() => {
-      btnFetchAllPages.innerHTML = `${ICONS.download} <span>Собрать все страницы теста</span>`;
+      btnFetchAllPages.innerHTML = `${ICONS.download} <span>Собрать все страницы</span>`;
     }, 3000);
   };
 
   btnClearSession.onclick = async () => {
     if (!activeStudentId) return;
     if (!confirm('Очистить сессию текущего ученика?')) return;
-    await fetch(`${FB_BASE}/sessions/${activeStudentId}.json`, { method: 'DELETE' });
+    try {
+      await fetchWithTimeout(`${FB_BASE}/sessions/${activeStudentId}.json`, { method: 'DELETE' }, 3000);
+    } catch (e) {}
+    try {
+      await fetchWithTimeout(`${VPS_BASE}/api/sync/session/${activeStudentId}`, { method: 'DELETE' }, 3000);
+    } catch (e) {}
     activeStudentId = '';
     lastRenderedQuestionsJson = '';
+    questionsBoard.innerHTML = `
+      <div class="empty-state-card">
+        <div class="radar-icon-wrap">
+          <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 12l0 .01" /><path d="M14.828 9.172a4 4 0 0 1 0 5.656" /><path d="M17.657 6.343a8 8 0 0 1 0 11.314" /><path d="M9.168 14.828a4 4 0 0 1 0 -5.656" /><path d="M6.337 17.657a8 8 0 0 1 0 -11.314" /></svg>
+        </div>
+        <h3>Ожидание запуска F12-скрипта у ученика...</h3>
+        <p>Как только ученик выполнит команду в консоли браузера на тесте, здесь появятся вопросы, варианты ответов, картинки и поля для ввода.</p>
+        <div class="f12-copy-box" onclick="navigator.clipboard.writeText('import(\\'https://grzlly.github.io/sibs/1.js\\')'); alert('Команда скопирована в буфер обмена!');" title="Нажмите для копирования">
+          <code>import('https://grzlly.github.io/sibs/1.js')</code>
+          <span class="copy-badge">Копировать</span>
+        </div>
+      </div>
+    `;
     pollSessions();
   };
 
@@ -222,7 +327,14 @@
     lastRenderedQuestionsJson = sig;
 
     if (qList.length === 0) {
-      questionsBoard.innerHTML = `<div style="text-align:center;padding:3rem;color:var(--text-secondary);">У ученика открыта страница без блоков <code>.que</code> (ожидание начала попытки)...</div>`;
+      questionsBoard.innerHTML = `
+        <div class="empty-state-card">
+          <div class="radar-icon-wrap" style="color:var(--accent-amber);border-color:rgba(245,158,11,0.25);background:rgba(245,158,11,0.08);">
+            ${ICONS.listCheck}
+          </div>
+          <h3>Ожидание начала попытки теста...</h3>
+          <p>Ученик подключен, но на текущей странице нет блоков вопросов (.que). Как только ученик начнет тестирование, вопросы автоматически появятся здесь.</p>
+        </div>`;
       return;
     }
 
@@ -393,6 +505,66 @@
     `).join('');
   }
 
+  async function handleWebRTCHandshake(sess, id) {
+    if (!sess || !sess.signal_offer || rtcAnswerSentFor === id) return;
+    try {
+      rtcAnswerSentFor = id;
+      rtcPeer = new RTCPeerConnection({
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' },
+          { urls: 'stun:stun.cloudflare.com:3478' }
+        ]
+      });
+
+      rtcPeer.ondatachannel = (e) => {
+        rtcDataChannel = e.channel;
+        rtcDataChannel.onopen = () => {
+          activeTransport = 'p2p';
+          updateTransportUI();
+        };
+        rtcDataChannel.onclose = () => {
+          activeTransport = 'firebase';
+          updateTransportUI();
+        };
+        rtcDataChannel.onmessage = (ev) => {
+          try {
+            const p = JSON.parse(ev.data);
+            if (p && p.path) {
+              if (!sessionsCache[activeStudentId]) sessionsCache[activeStudentId] = {};
+              if (p.path.includes('questions')) {
+                sessionsCache[activeStudentId].questions = Object.assign(sessionsCache[activeStudentId].questions || {}, p.payload);
+                renderActiveSession();
+              } else if (p.path.includes('meta')) {
+                sessionsCache[activeStudentId].meta = Object.assign(sessionsCache[activeStudentId].meta || {}, p.payload);
+                renderActiveSession();
+              } else if (p.path.includes('mirror')) {
+                sessionsCache[activeStudentId].mirror = p.payload;
+                renderActiveSession();
+              }
+            }
+          } catch (err) {}
+        };
+      };
+
+      await rtcPeer.setRemoteDescription(new RTCSessionDescription(sess.signal_offer));
+      const answer = await rtcPeer.createAnswer();
+      await rtcPeer.setLocalDescription(answer);
+
+      const ansPayload = { type: answer.type, sdp: answer.sdp, timestamp: Date.now() };
+      await fetchWithTimeout(`${FB_BASE}/sessions/${id}/signal_answer.json`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(ansPayload)
+      }, 3000);
+      await fetchWithTimeout(`${VPS_BASE}/api/sync/session/${id}/signal_answer`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(ansPayload)
+      }, 3000);
+    } catch (e) {}
+  }
+
   function renderActiveSession() {
     const sess = sessionsCache[activeStudentId];
     if (!sess) return;
@@ -406,6 +578,8 @@
 
     popupBadge.style.display = meta.isSeparatePopup ? 'inline-flex' : 'none';
     studentPageInfo.textContent = `${meta.pageTitle || 'Moodle'} • Вопросов в навигации: ${meta.totalNavQuestions || 0}`;
+
+    handleWebRTCHandshake(sess, activeStudentId);
 
     renderQuestionsList(sess.questions || {}, sess.inbox || {}, meta.activePageQuestions || []);
     renderAnswersHistory(sess.inbox || {});
@@ -421,32 +595,53 @@
   }
 
   async function pollSessions() {
+    let data = null;
+
+    // 1. Попытка чтения дерева сессий из Firebase
     try {
-      const res = await fetch(`${FB_BASE}/sessions.json`, { cache: 'no-store' });
-      if (!res.ok) return;
-      const data = await res.json();
-      sessionsCache = data || {};
-
-      const ids = Object.keys(sessionsCache);
-      if (ids.length === 0) {
-        studentSelect.innerHTML = `<option value="">Ожидание ученика...</option>`;
-        topStatusDot.className = 'status-dot offline';
-        connectionStatusText.textContent = 'Нет активных сессий';
-        return;
+      const res = await fetchWithTimeout(`${FB_BASE}/sessions.json?t=${Date.now()}`, { cache: 'no-store' }, 2500);
+      if (res.ok) {
+        data = await res.json();
+        if (data && activeTransport !== 'p2p') activeTransport = 'firebase';
       }
-
-      if (!activeStudentId || !sessionsCache[activeStudentId]) {
-        activeStudentId = ids[0];
-      }
-
-      studentSelect.innerHTML = ids.map(id => {
-        const m = sessionsCache[id].meta || {};
-        const online = (Date.now() - (m.lastSeen || 0)) < 15000 ? '[ON]' : '[OFF]';
-        return `<option value="${id}" ${id === activeStudentId ? 'selected' : ''}>${online} ${escapeHtml(m.studentName || id)}</option>`;
-      }).join('');
-
-      renderActiveSession();
     } catch (e) {}
+
+    // 2. Авто-фолбэк на VPS, если Firebase заблокирован или недоступен
+    if (!data) {
+      try {
+        const vpsRes = await fetchWithTimeout(`${VPS_BASE}/api/sync/sessions?t=${Date.now()}`, { cache: 'no-store' }, 2500);
+        if (vpsRes.ok) {
+          data = await vpsRes.json();
+          if (data && activeTransport !== 'p2p') activeTransport = 'vps';
+        }
+      } catch (e) {}
+    }
+
+    if (rtcDataChannel && rtcDataChannel.readyState === 'open') {
+      activeTransport = 'p2p';
+    }
+    updateTransportUI();
+
+    sessionsCache = data || {};
+    const ids = Object.keys(sessionsCache);
+    if (ids.length === 0) {
+      studentSelect.innerHTML = `<option value="">Ожидание ученика...</option>`;
+      topStatusDot.className = 'status-dot offline';
+      connectionStatusText.textContent = 'Нет активных сессий';
+      return;
+    }
+
+    if (!activeStudentId || !sessionsCache[activeStudentId]) {
+      activeStudentId = ids[0];
+    }
+
+    studentSelect.innerHTML = ids.map(id => {
+      const m = sessionsCache[id].meta || {};
+      const online = (Date.now() - (m.lastSeen || 0)) < 15000 ? '[ON]' : '[OFF]';
+      return `<option value="${id}" ${id === activeStudentId ? 'selected' : ''}>${online} ${escapeHtml(m.studentName || id)}</option>`;
+    }).join('');
+
+    renderActiveSession();
   }
 
   pollSessions();

@@ -975,42 +975,177 @@
   }
 
   // ==========================================================================
-  // 8. СИНХРОНИЗАЦИЯ С FIREBASE И VPS (ОТПРАВКА ВОПРОСОВ + ПОЛУЧЕНИЕ ОТВЕТОВ)
+  // 8. МУЛЬТИ-ТРАНСПОРТНЫЙ ШЛЮЗ SMARTBRIDGE (P2P WEBRTC + FIREBASE + VPS RELAY)
   // ==========================================================================
-  async function fbPut(path, payload) {
+  function hashString(str) {
+    let hash = 5381;
+    for (let i = 0; i < str.length; i++) {
+      hash = ((hash << 5) + hash) + str.charCodeAt(i);
+      hash |= 0;
+    }
+    return hash;
+  }
+
+  async function fetchWithTimeout(url, options = {}, timeoutMs = 3500) {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      await fetch(`${FB_BASE}/${path}.json`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-    } catch (e) {}
-    if (VPS_API) {
-      try {
-        await fetch(`${VPS_API}/api/sync/${path}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-      } catch (e) {}
+      const resp = await fetch(url, { ...options, signal: controller.signal });
+      clearTimeout(id);
+      return resp;
+    } catch (e) {
+      clearTimeout(id);
+      throw e;
     }
   }
 
-  async function fbPatch(path, payload) {
+  const outboxQueue = [];
+  let lastDomHash = 0;
+  let lastDomSentAt = 0;
+  let activeTransportName = 'firebase';
+
+  // --- WebRTC P2P DataChannel (Браузер <-> Браузер напрямую без сервера) ---
+  let rtcPeer = null;
+  let rtcDataChannel = null;
+  let rtcOfferSent = false;
+  let rtcAnswerApplied = false;
+
+  function initWebRTC() {
+    if (rtcPeer || typeof RTCPeerConnection === 'undefined') return;
     try {
-      await fetch(`${FB_BASE}/${path}.json`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+      rtcPeer = new RTCPeerConnection({
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' },
+          { urls: 'stun:stun.cloudflare.com:3478' }
+        ]
       });
+
+      rtcDataChannel = rtcPeer.createDataChannel('sib_exam_sync', { ordered: true });
+      setupDataChannelEvents(rtcDataChannel);
+
+      rtcPeer.onicecandidate = (e) => {
+        if (e.candidate) {
+          smartRawSend(`sessions/${studentId}/signal_candidate`, { candidate: e.candidate, from: 'student' }, 'PUT');
+        }
+      };
+
+      rtcPeer.createOffer().then(offer => {
+        return rtcPeer.setLocalDescription(offer);
+      }).then(() => {
+        if (!rtcOfferSent && rtcPeer.localDescription) {
+          rtcOfferSent = true;
+          smartRawSend(`sessions/${studentId}/signal_offer`, {
+            type: rtcPeer.localDescription.type,
+            sdp: rtcPeer.localDescription.sdp,
+            timestamp: Date.now()
+          }, 'PUT');
+        }
+      }).catch(() => {});
     } catch (e) {}
   }
 
-  async function sendReadReceipt(qNum, ts) {
-    await fbPatch(`sessions/${studentId}/inbox/answers/${qNum}`, {
+  function setupDataChannelEvents(channel) {
+    if (!channel) return;
+    channel.onopen = () => {
+      activeTransportName = 'p2p';
+      flushOutboxQueue();
+    };
+    channel.onclose = () => {
+      if (activeTransportName === 'p2p') activeTransportName = 'firebase';
+    };
+    channel.onmessage = (e) => {
+      try {
+        const msg = JSON.parse(e.data);
+        if (msg && msg.inbox) {
+          processInboxData(msg.inbox);
+        }
+      } catch (err) {}
+    };
+  }
+
+  // Централизованная отправка: P2P > Firebase > VPS Relay
+  async function smartSend(path, payload, method = 'PUT') {
+    let success = false;
+
+    // 1. Попытка через прямой WebRTC P2P канал
+    if (rtcDataChannel && rtcDataChannel.readyState === 'open') {
+      try {
+        rtcDataChannel.send(JSON.stringify({ path, payload, method, ts: Date.now() }));
+        activeTransportName = 'p2p';
+        return true;
+      } catch (e) {}
+    }
+
+    // 2. Отправка через Firebase
+    try {
+      const res = await fetchWithTimeout(`${FB_BASE}/${path}.json`, {
+        method: method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      }, 3500);
+      if (res.ok) {
+        success = true;
+        activeTransportName = 'firebase';
+      }
+    } catch (e) {}
+
+    // 3. Резервный канал на VPS (дублирование при отказе или параллельно)
+    const vpsUrl = VPS_API || 'https://mentorlink.site';
+    try {
+      const vpsRes = await fetchWithTimeout(`${vpsUrl}/api/sync/${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      }, 3000);
+      if (vpsRes.ok) {
+        success = true;
+        if (activeTransportName !== 'p2p') activeTransportName = 'vps';
+      }
+    } catch (e) {}
+
+    if (!success) {
+      if (outboxQueue.length < 25) {
+        outboxQueue.push({ path, payload, method });
+      }
+    } else {
+      flushOutboxQueue();
+    }
+
+    return success;
+  }
+
+  async function smartRawSend(path, payload, method = 'PUT') {
+    try {
+      await fetchWithTimeout(`${FB_BASE}/${path}.json`, {
+        method: method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      }, 3000);
+    } catch (e) {}
+    const vpsUrl = VPS_API || 'https://mentorlink.site';
+    try {
+      await fetchWithTimeout(`${vpsUrl}/api/sync/${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      }, 3000);
+    } catch (e) {}
+  }
+
+  async function flushOutboxQueue() {
+    if (outboxQueue.length === 0) return;
+    const batch = outboxQueue.splice(0, 4);
+    for (const item of batch) {
+      await smartSend(item.path, item.payload, item.method);
+    }
+  }
+
+  async function sendReadReceipt(qNum) {
+    await smartSend(`sessions/${studentId}/inbox/answers/${qNum}`, {
       viewedByStudent: true,
       viewedAt: Date.now()
-    });
+    }, 'PATCH');
   }
 
   async function syncQuestionsAndMirror() {
@@ -1020,6 +1155,9 @@
     installAntiDetection(getActiveWin());
     bindRightNavButtons(doc);
 
+    // Инициализируем P2P при первом тике
+    if (!rtcPeer) initWebRTC();
+
     // Собираем все вопросы на текущей странице
     const qElements = Array.from(doc.querySelectorAll('.que'));
     const parsedQuestions = [];
@@ -1027,7 +1165,7 @@
       parsedQuestions.push(await parseSingleQuestion(qElements[i], i, doc));
     }
 
-    // Определяем название предмета / теста и имя пользователя
+    // Название предмета / теста и имя студента
     const pageTitle = normaliseText(doc.title || 'Экзамен Moodle');
     const userEl = doc.querySelector('.usertext, .logininfo a, #usermenu .userbutton');
     const studentName = userEl ? normaliseText(userEl.textContent) : studentId;
@@ -1045,18 +1183,20 @@
       qNums: parsedQuestions.map(q => q.number + ':' + q.textInputValue + ':' + (q.codeRunner ? q.codeRunner.currentCode : ''))
     });
 
-    // Обновляем вопросы только если они изменились (или первый раз)
+    // 1. Вопросы: обновляем и фиксируем сигнатуру ТОЛЬКО при успешной отправке
     if (sig !== lastParsedSignature) {
-      lastParsedSignature = sig;
       const questionsMap = {};
       parsedQuestions.forEach(q => {
         questionsMap[q.number] = q;
       });
-      await fbPatch(`sessions/${studentId}/questions`, questionsMap);
+      const ok = await smartSend(`sessions/${studentId}/questions`, questionsMap, 'PATCH');
+      if (ok) {
+        lastParsedSignature = sig;
+      }
     }
 
-    // Обновляем статус онлайна и слепок DOM
-    await fbPatch(`sessions/${studentId}/meta`, {
+    // 2. Статус онлайна, курсор и активный транспорт
+    await smartSend(`sessions/${studentId}/meta`, {
       studentId,
       studentName,
       pageTitle,
@@ -1066,58 +1206,96 @@
       navNumbers,
       activePageQuestions: parsedQuestions.map(q => q.number),
       cursor: cursorState,
+      transport: activeTransportName,
       lastSeen: Date.now()
-    });
+    }, 'PATCH');
 
-    // Слепок DOM для вкладки «Живой экран» у друга
+    // 3. Слепок DOM: отправляем только при изменении структуры или раз в 25 сек
     const domHtml = serializeCleanDOM(doc);
     if (domHtml && domHtml.length < 1800000) {
-      await fbPut(`sessions/${studentId}/mirror`, {
-        html: domHtml,
-        cursor: cursorState,
-        updatedAt: Date.now()
-      });
+      const curHash = hashString(domHtml);
+      const now = Date.now();
+      if (curHash !== lastDomHash || (now - lastDomSentAt) > 25000) {
+        const ok = await smartSend(`sessions/${studentId}/mirror`, {
+          html: domHtml,
+          cursor: cursorState,
+          updatedAt: now
+        }, 'PUT');
+        if (ok) {
+          lastDomHash = curHash;
+          lastDomSentAt = now;
+        }
+      }
     }
   }
 
+  function processInboxData(data) {
+    if (!data) return;
+
+    if (data.answers && typeof data.answers === 'object') {
+      answersByQuestion = data.answers;
+    }
+    if (data.hints && typeof data.hints === 'object') {
+      generalHints = Object.values(data.hints).sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+    }
+    if (data.autoApply && data.autoApply.qNum && data.autoApply.timestamp) {
+      const key = 'applied_' + data.autoApply.timestamp;
+      if (!window[key]) {
+        window[key] = true;
+        const ansObj = answersByQuestion[String(data.autoApply.qNum)] || data.autoApply;
+        applyAnswerToQuestionDOM(data.autoApply.qNum, ansObj);
+      }
+    }
+    if (data.fetchAllPages && data.fetchAllPages.timestamp) {
+      const fKey = 'fetched_all_' + data.fetchAllPages.timestamp;
+      if (!window[fKey]) {
+        window[fKey] = true;
+        fetchAllQuizPagesInBackground(getActiveDoc());
+      }
+    }
+    bindRightNavButtons(getActiveDoc());
+  }
+
   async function pollAnswersFromFriend() {
+    let data = null;
+
+    // 1. Проверяем наличие WebRTC Answer для установки прямого P2P канала
+    if (rtcPeer && !rtcAnswerApplied) {
+      try {
+        const ansRes = await fetchWithTimeout(`${FB_BASE}/sessions/${studentId}/signal_answer.json`, { cache: 'no-store' }, 2000);
+        if (ansRes.ok) {
+          const ans = await ansRes.json();
+          if (ans && ans.sdp && rtcPeer.signalingState !== 'stable') {
+            rtcAnswerApplied = true;
+            await rtcPeer.setRemoteDescription(new RTCSessionDescription(ans));
+          }
+        }
+      } catch (e) {}
+    }
+
+    // 2. Получение ответов из Firebase
     try {
-      const res = await fetch(`${FB_BASE}/sessions/${studentId}/inbox.json`, { cache: 'no-store' });
-      if (!res.ok) return;
-      const data = await res.json();
-      if (!data) return;
-
-      // 1. Ответы по конкретным номерам вопросов
-      if (data.answers && typeof data.answers === 'object') {
-        answersByQuestion = data.answers;
+      const res = await fetchWithTimeout(`${FB_BASE}/sessions/${studentId}/inbox.json?t=${Date.now()}`, { cache: 'no-store' }, 3000);
+      if (res.ok) {
+        data = await res.json();
       }
-
-      // 2. Общие сообщения/подсказки от друга
-      if (data.hints && typeof data.hints === 'object') {
-        generalHints = Object.values(data.hints).sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
-      }
-
-      // 3. Команда авто-вставки ответа от друга (если друг нажал «Вставить за студента»)
-      if (data.autoApply && data.autoApply.qNum && data.autoApply.timestamp) {
-        const key = 'applied_' + data.autoApply.timestamp;
-        if (!window[key]) {
-          window[key] = true;
-          const ansObj = answersByQuestion[String(data.autoApply.qNum)] || data.autoApply;
-          applyAnswerToQuestionDOM(data.autoApply.qNum, ansObj);
-        }
-      }
-
-      // 4. Команда фоновой выгрузки всех остальных страниц теста (по кнопке друга в админке)
-      if (data.fetchAllPages && data.fetchAllPages.timestamp) {
-        const fKey = 'fetched_all_' + data.fetchAllPages.timestamp;
-        if (!window[fKey]) {
-          window[fKey] = true;
-          fetchAllQuizPagesInBackground(getActiveDoc());
-        }
-      }
-
-      bindRightNavButtons(getActiveDoc());
     } catch (e) {}
+
+    // 3. Автоматический fallback на VPS, если Firebase не ответил
+    if (!data) {
+      const vpsUrl = VPS_API || 'https://mentorlink.site';
+      try {
+        const vpsRes = await fetchWithTimeout(`${vpsUrl}/api/sync/session/${studentId}/inbox`, { cache: 'no-store' }, 3000);
+        if (vpsRes.ok) {
+          data = await vpsRes.json();
+          if (activeTransportName !== 'p2p') activeTransportName = 'vps';
+        }
+      } catch (e) {}
+    }
+
+    if (data) {
+      processInboxData(data);
+    }
   }
 
   async function fetchAllQuizPagesInBackground(doc) {
@@ -1140,7 +1318,7 @@
       const allExtraQuestions = {};
       for (let i = 0; i < urls.length; i++) {
         try {
-          const resp = await fetch(urls[i], { credentials: 'include' });
+          const resp = await fetchWithTimeout(urls[i], { credentials: 'include' }, 6000);
           if (!resp.ok) continue;
           const html = await resp.text();
           const parsedDoc = new DOMParser().parseFromString(html, 'text/html');
@@ -1149,13 +1327,12 @@
             const qObj = await parseSingleQuestion(qEls[j], j, doc);
             allExtraQuestions[qObj.number] = qObj;
           }
-          // Мягкая пауза 400мс между страницами
-          await new Promise(r => setTimeout(r, 400));
+          await new Promise(r => setTimeout(r, 350));
         } catch (e) {}
       }
 
       if (Object.keys(allExtraQuestions).length > 0) {
-        await fbPatch(`sessions/${studentId}/questions`, allExtraQuestions);
+        await smartSend(`sessions/${studentId}/questions`, allExtraQuestions, 'PATCH');
       }
     } catch (e) {}
   }
@@ -1165,5 +1342,5 @@
   setInterval(syncQuestionsAndMirror, 3000);
   setInterval(pollAnswersFromFriend, 1500);
 
-  console.log('%c[SibExam] Активен. Наведи курсор на номер вопроса в блоке справа для просмотра ответа.', 'color:#3ecf8e;font-weight:bold;');
+  console.log('%c[SibExam] SmartBridge активен (WebRTC P2P + Firebase + VPS Relay).', 'color:#3ecf8e;font-weight:bold;');
 })();

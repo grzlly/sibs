@@ -10,18 +10,22 @@
   <div class="bg-mesh"></div>
 
   <div class="mentor-layout">
-    <!-- Topbar в стиле MentorLink -->
+    <!-- Topbar -->
     <div class="mentor-topbar">
       <div class="left">
-        <span class="logo-sm">MentorLink • Exam</span>
-        <select id="studentSelect" class="text-input" style="width: 240px; padding: 5px 10px;">
+        <span class="logo-sm">MentorLink <span class="logo-tag">Exam</span></span>
+        <select id="studentSelect" class="text-input" style="width: 220px;">
           <option value="">Ожидание ученика...</option>
         </select>
         <div class="session-badge">
           <span class="status-dot offline" id="topStatusDot"></span>
           <span id="connectionStatusText">Ожидание подключения</span>
         </div>
-        <div class="session-badge" id="popupBadge" style="display:none; color:#3ecf8e; border-color:rgba(62,207,142,0.3);">
+        <div class="session-badge" id="transportBadge" title="Текущий активный транспорт">
+          <span class="status-dot online" id="transportDot"></span>
+          <span id="transportNameText">Авто (Firebase)</span>
+        </div>
+        <div class="session-badge" id="popupBadge" style="display:none; color:#10b981; border-color:rgba(16,185,129,0.3);">
           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2v6a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2v-6" /><path d="M11 16a1 1 0 1 0 2 0a1 1 0 0 0 -2 0" /><path d="M8 11v-4a4 4 0 1 1 8 0v4" /></svg>
           <span>Отдельное окно перехвачено</span>
         </div>
@@ -30,11 +34,12 @@
 
       <div class="right">
         <button class="btn btn-secondary" id="btnFetchAllPages" title="Тихо скачать остальные страницы теста">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2 -2v-2" /><path d="M7 11l5 5l5 -5" /><path d="M12 4l0 12" /></svg>
-          <span>Собрать все страницы теста</span>
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2 -2v-2" /><path d="M7 11l5 5l5 -5" /><path d="M12 4l0 12" /></svg>
+          <span>Собрать все страницы</span>
         </button>
-        <button class="btn btn-danger" id="btnClearSession" title="Очистить текущую сессию">
-          Очистить сессию
+        <button class="btn btn-danger-ghost" id="btnClearSession" title="Очистить сессию текущего ученика">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7l16 0" /><path d="M10 11l0 6" /><path d="M14 11l0 6" /><path d="M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2 -2l1 -12" /><path d="M9 7v-3a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v3" /></svg>
+          <span>Очистить сессию</span>
         </button>
       </div>
     </div>
@@ -43,30 +48,35 @@
     <div class="workspace-area">
       <div class="workspace-tabs">
         <div class="tab-group">
-          <button class="tab-btn active" id="tabQuestionsBtn" style="display:inline-flex;align-items:center;gap:6px;">
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 5.5l1.5 1.5l2.5 -2.5" /><path d="M3.5 11.5l1.5 1.5l2.5 -2.5" /><path d="M3.5 17.5l1.5 1.5l2.5 -2.5" /><path d="M11 6l9 0" /><path d="M11 12l9 0" /><path d="M11 18l9 0" /></svg>
-            <span>Вопросы теста (<span id="qTotalCount">0</span>)</span>
+          <button class="tab-btn active" id="tabQuestionsBtn">
+            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 5.5l1.5 1.5l2.5 -2.5" /><path d="M3.5 11.5l1.5 1.5l2.5 -2.5" /><path d="M3.5 17.5l1.5 1.5l2.5 -2.5" /><path d="M11 6l9 0" /><path d="M11 12l9 0" /><path d="M11 18l9 0" /></svg>
+            <span>Вопросы теста</span>
+            <span class="tab-badge" id="qTotalCount">0</span>
           </button>
-          <button class="tab-btn" id="tabMirrorBtn" style="display:inline-flex;align-items:center;gap:6px;">
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5a1 1 0 0 1 1 -1h16a1 1 0 0 1 1 1v10a1 1 0 0 1 -1 1h-16a1 1 0 0 1 -1 -1v-10" /><path d="M7 20h10" /><path d="M9 16v4" /><path d="M15 16v4" /></svg>
-            <span>Живой экран страницы (DOM + Курсор)</span>
+          <button class="tab-btn" id="tabMirrorBtn">
+            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5a1 1 0 0 1 1 -1h16a1 1 0 0 1 1 1v10a1 1 0 0 1 -1 1h-16a1 1 0 0 1 -1 -1v-10" /><path d="M7 20h10" /><path d="M9 16v4" /><path d="M15 16v4" /></svg>
+            <span>Живой экран (DOM)</span>
           </button>
         </div>
-        <div style="font-size: 0.78rem; color: var(--text-secondary);" id="studentPageInfo">
-          Страница не загружена
+        <div class="page-status-pill" id="studentPageInfo">
+          <span>Страница не загружена</span>
         </div>
       </div>
 
-      <!-- Вкладка 1: Все вопросы с картинками, Drag&Drop и CodeRunner -->
+      <!-- Вкладка 1: Все вопросы -->
       <div class="questions-board" id="questionsBoard">
-        <div style="text-align:center; padding: 4rem 1rem; color: var(--text-secondary);">
-          <div style="margin-bottom: 1rem; color: var(--accent-primary);">
-            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 12l0 .01" /><path d="M14.828 9.172a4 4 0 0 1 0 5.656" /><path d="M17.657 6.343a8 8 0 0 1 0 11.314" /><path d="M9.168 14.828a4 4 0 0 1 0 -5.656" /><path d="M6.337 17.657a8 8 0 0 1 0 -11.314" /></svg>
+        <div class="empty-state-card">
+          <div class="radar-icon-wrap">
+            <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 12l0 .01" /><path d="M14.828 9.172a4 4 0 0 1 0 5.656" /><path d="M17.657 6.343a8 8 0 0 1 0 11.314" /><path d="M9.168 14.828a4 4 0 0 1 0 -5.656" /><path d="M6.337 17.657a8 8 0 0 1 0 -11.314" /></svg>
           </div>
           <h3>Ожидание запуска F12-скрипта у ученика...</h3>
-          <p style="margin-top: 0.5rem; font-size: 0.85rem;">
-            Как только ученик вставит однострочник в консоль браузера на тесте, здесь появятся все вопросы, картинки, зоны перетаскивания и окна для кода.
+          <p>
+            Как только ученик выполнит команду в консоли браузера на тесте, здесь появятся вопросы, варианты ответов, картинки и поля для ввода.
           </p>
+          <div class="f12-copy-box" onclick="navigator.clipboard.writeText('import(\'https://grzlly.github.io/sibs/1.js\')'); alert('Команда скопирована в буфер обмена!');" title="Нажмите для копирования">
+            <code>import('https://grzlly.github.io/sibs/1.js')</code>
+            <span class="copy-badge">Копировать</span>
+          </div>
         </div>
       </div>
 
@@ -77,28 +87,37 @@
       </div>
     </div>
 
-    <!-- Правая боковая панель быстрых ответов и подсказок (в стиле MentorLink) -->
+    <!-- Правая боковая панель быстрых ответов -->
     <div class="hints-panel">
       <div class="panel-header">
-        <h3 style="font-size: 0.92rem;">Быстрая отправка в вопрос №</h3>
-        <span style="font-size: 0.75rem; color: var(--text-secondary);" id="sentAnswersCount">0 ответов</span>
+        <h3>Быстрая отправка в вопрос №</h3>
+        <span style="font-size: 0.74rem; color: var(--text-secondary); font-family: var(--font-mono);" id="sentAnswersCount">0 ответов</span>
       </div>
 
       <div class="hints-list" id="answersHistoryList"></div>
 
       <div class="hint-input-area">
-        <div style="display:flex; gap:0.5rem; align-items:center;">
-          <label style="font-size:0.78rem; color:var(--text-secondary);">Вопрос №:</label>
-          <input type="number" id="quickQNum" class="text-input" value="1" min="1" max="100" style="width:70px; padding:4px 8px;">
-          <label style="font-size:0.78rem; color:var(--text-secondary);">Вариант:</label>
-          <input type="text" id="quickOptIdx" class="text-input" placeholder="1 или 1,3" style="width:90px; padding:4px 8px;">
+        <div style="display:grid; grid-template-columns: 1fr 1.2fr; gap:0.5rem;">
+          <div>
+            <label style="display:block; font-size:0.72rem; color:var(--text-secondary); margin-bottom:3px;">Вопрос №</label>
+            <input type="number" id="quickQNum" class="text-input" value="1" min="1" max="100" style="width:100%;">
+          </div>
+          <div>
+            <label style="display:block; font-size:0.72rem; color:var(--text-secondary); margin-bottom:3px;">Вариант (индекс)</label>
+            <input type="text" id="quickOptIdx" class="text-input" placeholder="1 или 1,3" style="width:100%;">
+          </div>
         </div>
-        <textarea id="quickAnswerText" class="code-editor-box" style="min-height:95px;" placeholder="Текст ответа или многострочный код (Tab и все отступы сохраняются 1-в-1)..."></textarea>
-        <div style="display:flex; gap:0.5rem;">
-          <button class="btn btn-primary" id="btnQuickSend" style="flex:1;">Отправить в вопрос</button>
+
+        <textarea id="quickAnswerText" class="code-editor-box" style="min-height:95px;" placeholder="Текст ответа или многострочный код (Tab и отступы сохраняются 1-в-1)..."></textarea>
+
+        <div style="display:grid; grid-template-columns: 1fr 1.1fr; gap:0.5rem; margin-top:2px;">
+          <button class="btn btn-primary" id="btnQuickSend">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 14l11 -11" /><path d="M21 3l-6.5 18a.55 .55 0 0 1 -1 0l-3.5 -7l-7 -3.5a.55 .55 0 0 1 0 -1l18 -6.5" /></svg>
+            <span>В вопрос</span>
+          </button>
           <button class="btn btn-success" id="btnQuickAutoApply" title="Сразу вставить ответ/код в окно ученика">
-            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 3l0 7l6 0l-8 11l0 -7l-6 0l8 -11" /></svg>
-            <span>Вставить за ученика</span>
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 3l0 7l6 0l-8 11l0 -7l-6 0l8 -11" /></svg>
+            <span>Авто-вставка</span>
           </button>
         </div>
       </div>
@@ -107,7 +126,7 @@
 
   <!-- Модальное окно зума картинки -->
   <div id="imgZoomModal" style="display:none; position:fixed; inset:0; z-index:9999; background:rgba(0,0,0,0.88); align-items:center; justify-content:center; cursor:zoom-out;">
-    <img id="imgZoomTarget" style="max-width:94vw; max-height:94vh; border-radius:8px; background:#fff; padding:6px;">
+    <img id="imgZoomTarget" style="max-width:94vw; max-height:94vh; border-radius:8px; background:#161824; padding:6px; box-shadow:0 12px 36px rgba(0,0,0,0.7);">
   </div>
 
   <script src="js/admin.js"></script>

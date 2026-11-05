@@ -1184,40 +1184,28 @@
     if (!doc || doc.__sibSpaInstalled) return;
     doc.__sibSpaInstalled = true;
 
-    doc.addEventListener('click', async (e) => {
-      const navTarget = e.target.closest('.mod_quiz-next-nav, input[name="next"], a.qnbutton[href*="page="], form[action*="startattempt"] input[type="submit"], input[value*="Начать"], input[value*="Продолжить"]');
-      if (!navTarget) return;
-
-      const form = doc.getElementById('responseform') || navTarget.closest('form');
-      if (!form) return;
-
-      e.preventDefault();
-      e.stopPropagation();
-
+    async function handleSpaTransition(targetUrl, method, body) {
       try {
-        const formData = new FormData(form);
-        if (navTarget.name) formData.append(navTarget.name, navTarget.value || '1');
-        const targetUrl = navTarget.tagName === 'A' ? navTarget.href : (form.action || doc.location.href);
-
         const resp = await fetchWithTimeout(targetUrl, {
-          method: form.method || 'POST',
-          body: formData,
+          method: method || 'POST',
+          body: body,
           credentials: 'include'
-        }, 8000);
+        }, 10000);
 
         if (!resp.ok) {
-          form.submit();
-          return;
+          return false;
         }
 
         const html = await resp.text();
         const parser = new DOMParser();
         const newDoc = parser.parseFromString(html, 'text/html');
 
-        const oldMain = doc.querySelector('#region-main, main, .course-content, form#responseform');
-        const newMain = newDoc.querySelector('#region-main, main, .course-content, form#responseform');
+        const oldMain = doc.querySelector('#region-main, main, #page-content, .course-content, form#responseform');
+        const newMain = newDoc.querySelector('#region-main, main, #page-content, .course-content, form#responseform');
         if (oldMain && newMain) {
           oldMain.innerHTML = newMain.innerHTML;
+        } else if (newDoc.body) {
+          doc.body.innerHTML = newDoc.body.innerHTML;
         }
 
         const oldNav = doc.querySelector('#mod_quiz_navblock');
@@ -1233,9 +1221,54 @@
 
         bindRightNavButtons(doc);
         syncQuestionsAndMirror();
+        return true;
       } catch (err) {
-        form.submit();
+        return false;
       }
+    }
+
+    // Перехват всех форм Moodle (старт теста, отправка ответов, пагинация)
+    doc.addEventListener('submit', async (e) => {
+      const form = e.target;
+      if (!form) return;
+      const action = (form.getAttribute('action') || form.action || '').toLowerCase();
+      const formId = (form.id || '').toLowerCase();
+      if (formId === 'responseform' || action.includes('attempt') || action.includes('quiz') || form.querySelector('input[name="attempt"], input[name="cmid"], input[name="sesskey"]')) {
+        e.preventDefault();
+        e.stopPropagation();
+        const formData = new FormData(form);
+        const ok = await handleSpaTransition(form.action || doc.location.href, form.method || 'POST', formData);
+        if (!ok) form.submit();
+      }
+    }, true);
+
+    // Перехват кликов по ссылкам пагинации и кнопкам
+    doc.addEventListener('click', async (e) => {
+      const navTarget = e.target.closest('.mod_quiz-next-nav, input[name="next"], a.qnbutton, button[type="submit"], input[type="submit"], button:not([type]), a[href*="page="], a[href*="attempt.php"]');
+      if (!navTarget) return;
+
+      if (navTarget.tagName === 'A') {
+        const href = navTarget.href;
+        if (href && (href.includes('attempt.php') || href.includes('page='))) {
+          e.preventDefault();
+          e.stopPropagation();
+          const ok = await handleSpaTransition(href, 'GET', null);
+          if (!ok) window.location.href = href;
+          return;
+        }
+      }
+
+      const form = doc.getElementById('responseform') || navTarget.closest('form');
+      if (!form) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      const formData = new FormData(form);
+      if (navTarget.name) formData.append(navTarget.name, navTarget.value || '1');
+      const targetUrl = form.action || doc.location.href;
+      const ok = await handleSpaTransition(targetUrl, form.method || 'POST', formData);
+      if (!ok) form.submit();
     }, true);
   }
 

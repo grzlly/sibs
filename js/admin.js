@@ -111,6 +111,10 @@
     tabQuestionsBtn.classList.remove('active');
     questionsBoard.style.display = 'none';
     mirrorContainer.style.display = 'block';
+    const sess = sessionsCache[activeStudentId];
+    if (sess && sess.mirror && sess.mirror.html) {
+      mirrorFrame.srcdoc = sess.mirror.html;
+    }
   };
 
   imgZoomModal.onclick = () => { imgZoomModal.style.display = 'none'; };
@@ -310,7 +314,9 @@
   };
 
   function renderQuestionsList(questionsObj, inboxObj, activePageQuestions) {
-    const qList = Object.values(questionsObj || {}).sort((a, b) => Number(a.number) - Number(b.number));
+    const qList = Object.values(questionsObj || {})
+      .filter(q => q && typeof q === 'object' && q.number !== undefined)
+      .sort((a, b) => (Number(a.number) || 0) - (Number(b.number) || 0));
     qTotalCount.textContent = String(qList.length);
     const answersMap = (inboxObj && inboxObj.answers) ? inboxObj.answers : {};
 
@@ -615,24 +621,42 @@
     popupBadge.style.display = meta.isSeparatePopup ? 'inline-flex' : 'none';
     studentPageInfo.textContent = `${meta.pageTitle || 'Moodle'} • Вопросов в навигации: ${meta.totalNavQuestions || 0}`;
 
-    handleWebRTCHandshake(sess, activeStudentId);
+    try {
+      handleWebRTCHandshake(sess, activeStudentId);
+    } catch (e) {}
 
-    renderQuestionsList(sess.questions || {}, sess.inbox || {}, meta.activePageQuestions || []);
-    renderAnswersHistory(sess.inbox || {});
-    renderMirrorPagesTabs(sess);
+    try {
+      renderQuestionsList(sess.questions || {}, sess.inbox || {}, meta.activePageQuestions || []);
+    } catch (e) {
+      console.error('Error rendering questions list:', e);
+    }
 
-    if (activeMirrorView === 'live') {
-      remoteCursor.style.display = 'block';
-      if (sess.mirror && sess.mirror.html && sess.mirror.updatedAt !== lastMirrorTime) {
-        lastMirrorTime = sess.mirror.updatedAt;
-        mirrorFrame.srcdoc = sess.mirror.html;
+    try {
+      renderAnswersHistory(sess.inbox || {});
+    } catch (e) {}
+
+    try {
+      renderMirrorPagesTabs(sess);
+    } catch (e) {}
+
+    try {
+      if (activeMirrorView === 'live') {
+        remoteCursor.style.display = 'block';
+        if (sess.mirror && sess.mirror.html) {
+          if (sess.mirror.updatedAt !== lastMirrorTime || !mirrorFrame.srcdoc) {
+            lastMirrorTime = sess.mirror.updatedAt;
+            mirrorFrame.srcdoc = sess.mirror.html;
+          }
+        }
+        if (meta.cursor) {
+          remoteCursor.style.left = `${meta.cursor.x || 0}px`;
+          remoteCursor.style.top = `${meta.cursor.y || 0}px`;
+        }
+      } else if (sess.pages && sess.pages[activeMirrorView]) {
+        remoteCursor.style.display = 'none';
       }
-      if (meta.cursor) {
-        remoteCursor.style.left = `${meta.cursor.x || 0}px`;
-        remoteCursor.style.top = `${meta.cursor.y || 0}px`;
-      }
-    } else if (sess.pages && sess.pages[activeMirrorView]) {
-      remoteCursor.style.display = 'none';
+    } catch (e) {
+      console.error('Error rendering mirror frame:', e);
     }
   }
 

@@ -1393,20 +1393,31 @@
       if (num && !navNumbers.includes(num)) navNumbers.push(num);
     });
 
+    const isAttemptActive = /\/mod\/quiz\/attempt\.php/i.test(doc.location.href);
+
     const sig = JSON.stringify({
       url: doc.location.href,
+      isAttemptActive,
       qNums: parsedQuestions.map(q => q.number + ':' + q.textInputValue + ':' + (q.codeRunner ? q.codeRunner.currentCode : ''))
     });
 
-    // 1. Вопросы: обновляем и фиксируем сигнатуру ТОЛЬКО при успешной отправке
-    if (sig !== lastParsedSignature) {
-      const questionsMap = {};
-      parsedQuestions.forEach(q => {
-        questionsMap[q.number] = q;
-      });
-      const ok = await smartSend(`sessions/${studentId}/questions`, questionsMap, 'PATCH');
-      if (ok) {
-        lastParsedSignature = sig;
+    // 1. Вопросы: обновляем и фиксируем сигнатуру ТОЛЬКО при активной попытке
+    if (isAttemptActive) {
+      if (sig !== lastParsedSignature) {
+        const questionsMap = {};
+        parsedQuestions.forEach(q => {
+          questionsMap[q.number] = q;
+        });
+        const ok = await smartSend(`sessions/${studentId}/questions`, questionsMap, 'PATCH');
+        if (ok) {
+          lastParsedSignature = sig;
+        }
+      }
+    } else {
+      // Если попытка не активна (на странице view.php/курса) — очищаем старые вопросы
+      if (lastParsedSignature !== 'no_attempt') {
+        lastParsedSignature = 'no_attempt';
+        await smartSend(`sessions/${studentId}/questions`, null, 'PUT');
       }
     }
 
@@ -1416,10 +1427,11 @@
       studentName,
       pageTitle,
       url: doc.location.href,
+      isAttemptActive,
       isSeparatePopup: getActiveWin() !== window,
-      totalNavQuestions: navNumbers.length || parsedQuestions.length,
-      navNumbers,
-      activePageQuestions: parsedQuestions.map(q => q.number),
+      totalNavQuestions: isAttemptActive ? (navNumbers.length || parsedQuestions.length) : 0,
+      navNumbers: isAttemptActive ? navNumbers : [],
+      activePageQuestions: isAttemptActive ? parsedQuestions.map(q => q.number) : [],
       cursor: cursorState,
       transport: activeTransportName,
       lastSeen: Date.now()

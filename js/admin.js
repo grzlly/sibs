@@ -313,7 +313,37 @@
     renderActiveSession();
   };
 
-  function renderQuestionsList(questionsObj, inboxObj, activePageQuestions) {
+  function renderQuestionsList(questionsObj, inboxObj, activePageQuestions, isAttemptActive, meta, isOnline) {
+    if (!isAttemptActive) {
+      qTotalCount.textContent = '0';
+      const sig = 'inactive_' + (isOnline ? 'online' : 'offline') + '_' + (meta?.url || '');
+      if (sig === lastRenderedQuestionsJson) return;
+      lastRenderedQuestionsJson = sig;
+
+      if (isOnline) {
+        questionsBoard.innerHTML = `
+          <div class="empty-state-card">
+            <div class="radar-icon-wrap" style="color:var(--accent-amber);border-color:rgba(245,158,11,0.25);background:rgba(245,158,11,0.08);">
+              ${ICONS.listCheck}
+            </div>
+            <h3>Тест сейчас не запущен</h3>
+            <p>Ученик в сети (<strong>${escapeHtml(meta?.studentName || activeStudentId)}</strong>), но тестирование не начато.<br>
+            Текущая страница: <code>${escapeHtml(meta?.pageTitle || meta?.url || 'view.php')}</code>.<br>
+            Кнопки выбора и отправки вариантов заблокированы. Как только ученик нажмёт «Начать попытку», вопросы текущего теста автоматически появятся здесь.</p>
+          </div>`;
+      } else {
+        questionsBoard.innerHTML = `
+          <div class="empty-state-card">
+            <div class="radar-icon-wrap" style="color:var(--text-secondary);border-color:rgba(100,116,139,0.3);background:rgba(100,116,139,0.08);">
+              ${ICONS.listCheck}
+            </div>
+            <h3>Ученик не в сети (тест не активен)</h3>
+            <p>Сессия не активна или закрыта. Ожидание запуска F12-скрипта на странице активного теста Moodle.</p>
+          </div>`;
+      }
+      return;
+    }
+
     const qList = Object.values(questionsObj || {})
       .filter(q => q && typeof q === 'object' && q.number !== undefined)
       .sort((a, b) => (Number(a.number) || 0) - (Number(b.number) || 0));
@@ -613,20 +643,36 @@
 
     const meta = sess.meta || {};
     const isOnline = (Date.now() - (meta.lastSeen || 0)) < 15000;
+    const isAttemptActive = isOnline && (meta.isAttemptActive !== false) && (meta.url || '').includes('attempt.php');
+
     topStatusDot.className = 'status-dot ' + (isOnline ? 'online' : 'offline');
     connectionStatusText.textContent = isOnline
-      ? `Онлайн: ${meta.studentName || activeStudentId}`
+      ? (isAttemptActive ? `Онлайн (Тест активен): ${meta.studentName || activeStudentId}` : `Онлайн (Тест не запущен): ${meta.studentName || activeStudentId}`)
       : `Офлайн (${meta.studentName || activeStudentId})`;
 
     popupBadge.style.display = meta.isSeparatePopup ? 'inline-flex' : 'none';
     studentPageInfo.textContent = `${meta.pageTitle || 'Moodle'} • Вопросов в навигации: ${meta.totalNavQuestions || 0}`;
+
+    // Блокировка/разблокировка контролов отправки ответов
+    quickQNum.disabled = !isAttemptActive;
+    quickOptIdx.disabled = !isAttemptActive;
+    quickAnswerText.disabled = !isAttemptActive;
+    btnQuickSend.disabled = !isAttemptActive;
+    btnQuickAutoApply.disabled = !isAttemptActive;
+    if (btnFetchAllPages) btnFetchAllPages.disabled = !isAttemptActive;
+
+    if (sentAnswersCount) {
+      sentAnswersCount.innerHTML = isAttemptActive
+        ? `<span style="color:#10b981;font-weight:600;">● Тест запущен</span>`
+        : `<span style="color:#f59e0b;font-weight:600;">○ Тест не запущен</span>`;
+    }
 
     try {
       handleWebRTCHandshake(sess, activeStudentId);
     } catch (e) {}
 
     try {
-      renderQuestionsList(sess.questions || {}, sess.inbox || {}, meta.activePageQuestions || []);
+      renderQuestionsList(sess.questions || {}, sess.inbox || {}, meta.activePageQuestions || [], isAttemptActive, meta, isOnline);
     } catch (e) {
       console.error('Error rendering questions list:', e);
     }

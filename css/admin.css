@@ -120,6 +120,13 @@ body {
 .btn svg { flex-shrink: 0; }
 .btn:hover { filter: brightness(1.08); transform: translateY(-1px); }
 .btn:active { transform: translateY(0); filter: brightness(0.95); }
+.btn:disabled, .text-input:disabled, .code-editor-box:disabled {
+  opacity: 0.42;
+  cursor: not-allowed !important;
+  pointer-events: none !important;
+  filter: grayscale(0.5);
+  transform: none !important;
+}
 
 .btn-primary {
   background: linear-gradient(135deg, #6366f1, #4f46e5);

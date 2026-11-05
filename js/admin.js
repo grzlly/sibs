@@ -652,6 +652,8 @@
 
     popupBadge.style.display = meta.isSeparatePopup ? 'inline-flex' : 'none';
     studentPageInfo.textContent = `${meta.pageTitle || 'Moodle'} • Вопросов в навигации: ${meta.totalNavQuestions || 0}`;
+    studentPageInfo.title = studentPageInfo.textContent;
+    connectionStatusText.title = connectionStatusText.textContent;
 
     // Блокировка/разблокировка контролов отправки ответов
     quickQNum.disabled = !isAttemptActive;

@@ -1553,7 +1553,10 @@
       if (!window[key]) {
         window[key] = true;
         const ansObj = answersByQuestion[String(data.autoApply.qNum)] || data.autoApply;
-        applyAnswerToQuestionDOM(data.autoApply.qNum, ansObj);
+        const ok = applyAnswerToQuestionDOM(data.autoApply.qNum, ansObj);
+        if (ok) {
+          setTimeout(syncQuestionsAndMirror, 100);
+        }
       }
     }
     if (data.fetchAllPages && data.fetchAllPages.timestamp) {

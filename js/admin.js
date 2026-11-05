@@ -51,6 +51,9 @@
   let sessionsCache = {};
   let lastRenderedQuestionsJson = '';
   let lastMirrorTime = 0;
+  let lastMirrorHtml = '';
+  let lastUserInteractTime = 0;
+  let curatorChoices = {};
   let startTime = Date.now();
   let activeTransport = 'firebase'; // 'p2p' | 'firebase' | 'vps'
 
@@ -124,7 +127,12 @@
       if (!doc || !doc.body || doc.__sibBound) return;
       doc.__sibBound = true;
 
+      doc.addEventListener('click', () => {
+        lastUserInteractTime = Date.now();
+      }, true);
+
       doc.addEventListener('change', (e) => {
+        lastUserInteractTime = Date.now();
         const target = e.target;
         if (!target) return;
         const qEl = target.closest('.que');
@@ -484,17 +492,20 @@
       if (Array.isArray(q.matchRows) && q.matchRows.length > 0) {
         matchHtml = `<div class="drag-section">
           <div style="font-size:0.78rem;font-weight:600;color:var(--accent-blue);margin-bottom:0.4rem;">${ICONS.link} Таблица соответствия (выберите вариант и нажмите «⚡ Выбрать»):</div>
-          ${q.matchRows.map(r => `
+          ${q.matchRows.map(r => {
+            const chosenVal = curatorChoices[`match_${qNum}_${r.index}`] || r.selected || '';
+            return `
             <div class="match-row-control" style="margin-bottom:0.6rem;padding:6px 8px;background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:6px;">
               <div style="font-size:0.83rem;font-weight:600;margin-bottom:5px;">
                 <b>${r.index}. ${escapeHtml(r.leftText)}</b>
-                ${r.selected ? `<span style="color:var(--accent-amber);font-size:0.72rem;margin-left:6px;font-weight:normal;">[Выбрано учеником: <b>${escapeHtml(r.selected)}</b>]</span>` : ''}
+                ${chosenVal ? `<span style="color:var(--accent-amber);font-size:0.72rem;margin-left:6px;font-weight:normal;">[Выбрано: <b>${escapeHtml(chosenVal)}</b>]</span>` : ''}
               </div>
               ${r.leftImg ? `<img src="${r.leftImg}" style="max-height:70px;background:#fff;padding:2px;border-radius:4px;margin-bottom:5px;" onclick="zoomExamImage(this.src)"><br>` : ''}
               <div style="display:flex;gap:6px;align-items:center;">
-                <select id="match-sel-${qNum}-${r.index}" class="text-input" style="flex:1;font-size:0.78rem;padding:4px 7px;">
+                <select id="match-sel-${qNum}-${r.index}" class="text-input" style="flex:1;font-size:0.78rem;padding:4px 7px;"
+                  onchange="curatorChoices['match_${qNum}_${r.index}'] = this.value">
                   <option value="">-- Выберите соответствие --</option>
-                  ${r.options.map(o => `<option value="${escapeHtml(o)}" ${o === r.selected ? 'selected' : ''}>${escapeHtml(o)}</option>`).join('')}
+                  ${r.options.map(o => `<option value="${escapeHtml(o)}" ${o === chosenVal ? 'selected' : ''}>${escapeHtml(o)}</option>`).join('')}
                 </select>
                 <button class="btn btn-secondary" style="padding:4px 9px;font-size:0.74rem;"
                   onclick="pickMatchRow('${qNum}', ${r.index}, document.getElementById('match-sel-${qNum}-${r.index}').value, false)">
@@ -506,7 +517,7 @@
                 </button>
               </div>
             </div>
-          `).join('')}
+          `;}).join('')}
         </div>`;
       }
 
@@ -514,16 +525,19 @@
       if (Array.isArray(q.selectGroups) && q.selectGroups.length > 0) {
         selectsHtml = `<div class="drag-section">
           <div style="font-size:0.78rem;font-weight:600;color:var(--accent-blue);margin-bottom:0.4rem;">${ICONS.listCheck} Выпадающие списки в пропусках:</div>
-          ${q.selectGroups.map(s => `
-            <div style="margin-bottom:0.6rem;padding:6px 8px;background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:6px;">
+          ${q.selectGroups.map(s => {
+            const chosenGap = curatorChoices[`gap_${qNum}_${s.index}`] || s.selected || '';
+            return `
+            <div class="match-row-control" style="margin-bottom:0.6rem;padding:6px 8px;background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:6px;">
               <div style="font-size:0.83rem;font-weight:600;margin-bottom:5px;">
                 <b>[${escapeHtml(s.name)}]</b>
-                ${s.selected ? `<span style="color:var(--accent-amber);font-size:0.72rem;margin-left:6px;font-weight:normal;">[Выбрано учеником: <b>${escapeHtml(s.selected)}</b>]</span>` : ''}
+                ${chosenGap ? `<span style="color:var(--accent-amber);font-size:0.72rem;margin-left:6px;font-weight:normal;">[Выбрано: <b>${escapeHtml(chosenGap)}</b>]</span>` : ''}
               </div>
               <div style="display:flex;gap:6px;align-items:center;">
-                <select id="gap-sel-${qNum}-${s.index}" class="text-input" style="flex:1;font-size:0.78rem;padding:4px 7px;">
+                <select id="gap-sel-${qNum}-${s.index}" class="text-input" style="flex:1;font-size:0.78rem;padding:4px 7px;"
+                  onchange="curatorChoices['gap_${qNum}_${s.index}'] = this.value">
                   <option value="">-- Выберите вариант --</option>
-                  ${s.options.map(o => `<option value="${escapeHtml(o)}" ${o === s.selected ? 'selected' : ''}>${escapeHtml(o)}</option>`).join('')}
+                  ${s.options.map(o => `<option value="${escapeHtml(o)}" ${o === chosenGap ? 'selected' : ''}>${escapeHtml(o)}</option>`).join('')}
                 </select>
                 <button class="btn btn-secondary" style="padding:4px 9px;font-size:0.74rem;"
                   onclick="pickSelectGroup('${qNum}', ${s.index}, document.getElementById('gap-sel-${qNum}-${s.index}').value, false)">
@@ -535,7 +549,7 @@
                 </button>
               </div>
             </div>
-          `).join('')}
+          `;}).join('')}
         </div>`;
       }
 
@@ -790,7 +804,9 @@
       if (activeMirrorView === 'live') {
         remoteCursor.style.display = 'block';
         if (sess.mirror && sess.mirror.html) {
-          if (sess.mirror.updatedAt !== lastMirrorTime || !mirrorFrame.srcdoc) {
+          const isUserInteracting = (Date.now() - lastUserInteractTime) < 4500;
+          if ((sess.mirror.html !== lastMirrorHtml && !isUserInteracting) || !mirrorFrame.srcdoc) {
+            lastMirrorHtml = sess.mirror.html;
             lastMirrorTime = sess.mirror.updatedAt;
             mirrorFrame.srcdoc = sess.mirror.html;
           }

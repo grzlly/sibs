@@ -665,7 +665,12 @@
     updateTransportUI();
 
     sessionsCache = data || {};
-    const ids = Object.keys(sessionsCache);
+    const ids = Object.keys(sessionsCache).sort((a, b) => {
+      const tA = Number(sessionsCache[a]?.meta?.lastSeen || 0);
+      const tB = Number(sessionsCache[b]?.meta?.lastSeen || 0);
+      return tB - tA;
+    });
+
     if (ids.length === 0) {
       studentSelect.innerHTML = `<option value="">Ожидание ученика...</option>`;
       topStatusDot.className = 'status-dot offline';

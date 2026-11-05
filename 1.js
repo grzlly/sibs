@@ -800,23 +800,28 @@
 
     box = doc.createElement('div');
     box.id = 'sib-stealth-nav-popup';
-    // Стилизовано под нативную системную подсказку состояния вопроса Moodle (серо-белая карточка)
+    // Ультра-компактный stealth-виджет строго в левом нижнем углу
     box.style.cssText = [
       'position: fixed',
       'z-index: 2147483646',
       'display: none',
-      'width: 270px',
-      'max-height: 240px',
+      'bottom: 12px',
+      'left: 12px',
+      'top: auto',
+      'right: auto',
+      'width: 175px',
+      'max-width: 195px',
+      'max-height: 125px',
       'overflow-y: auto',
-      'background: rgba(248, 249, 250, 0.98)',
+      'background: rgba(255, 255, 255, 0.96)',
       'color: #212529',
       'border: 1px solid #ced4da',
       'border-radius: 4px',
-      'padding: 7px 9px',
+      'padding: 3px 5px',
       'font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif',
-      'font-size: 11.5px',
-      'line-height: 1.4',
-      'box-shadow: 0 2px 8px rgba(0,0,0,0.10)',
+      'font-size: 9.5px',
+      'line-height: 1.25',
+      'box-shadow: 0 2px 8px rgba(0,0,0,0.12)',
       'user-select: text',
       'pointer-events: auto'
     ].join(';');
@@ -828,7 +833,9 @@
       }
     });
     box.addEventListener('mouseleave', () => {
-      box.style.display = 'none';
+      hoverHideTimeout = setTimeout(() => {
+        box.style.display = 'none';
+      }, 1800);
     });
 
     doc.addEventListener('keydown', (e) => {
@@ -853,29 +860,30 @@
     const lastGeneral = generalHints.length > 0 ? generalHints[generalHints.length - 1] : null;
 
     if (!ans && !lastGeneral) {
-      box.innerHTML = `<div style="color:#6c757d;font-size:11px;">Вопрос №${escapeHtml(qNum)}: ожидание ответа...</div>`;
+      box.innerHTML = `<div style="color:#6c757d;font-size:9px;">№${escapeHtml(qNum)}: ждем ответ...</div>`;
     } else {
       let html = '';
       if (ans) {
         const exactCode = decodeExactCode(ans);
         const isCode = !!(ans.codeBase64 || ans.code || ans.isCode || (exactCode.includes('\n') && ans.type && ans.type.includes('Код')));
-        html += `<div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #e9ecef;padding-bottom:3px;margin-bottom:5px;color:#495057;font-size:10.5px;gap:6px;">
-          <span><b>№${escapeHtml(qNum)}</b> ${ans.optionIndex ? `• Вариант: <b>${escapeHtml(ans.optionIndex)}</b>` : ''}</span>
-          <span style="display:inline-flex;gap:6px;">
-            <a href="#" id="sib-copy-ans-btn" style="color:#495057;text-decoration:underline;cursor:pointer;font-size:10px;">[Копировать]</a>
-            <a href="#" id="sib-apply-ans-btn" style="color:#495057;text-decoration:underline;cursor:pointer;font-size:10px;">[${isCode ? 'Вставить код' : 'Применить'}]</a>
+        html += `<div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #e9ecef;padding-bottom:2px;margin-bottom:2px;color:#495057;font-size:9px;gap:3px;">
+          <span><b>№${escapeHtml(qNum)}</b> ${ans.optionIndex ? `Вар:<b>${escapeHtml(ans.optionIndex)}</b>` : ''}</span>
+          <span style="display:inline-flex;gap:3px;align-items:center;">
+            <a href="#" id="sib-copy-ans-btn" style="color:#495057;text-decoration:underline;cursor:pointer;font-size:8.5px;">[Коп]</a>
+            <a href="#" id="sib-apply-ans-btn" style="color:#495057;text-decoration:underline;cursor:pointer;font-size:8.5px;">[${isCode ? 'Код' : 'Вставить'}]</a>
+            <a href="#" id="sib-close-ans-btn" style="color:#adb5bd;text-decoration:none;cursor:pointer;font-size:11px;line-height:1;padding:0 2px;" title="Закрыть">×</a>
           </span>
         </div>`;
 
         if (isCode) {
-          html += `<pre style="margin:0;padding:6px;background:#f1f3f5;border:1px solid #dee2e6;border-radius:3px;font-family:Consolas,'Courier New',monospace;font-size:10.5px;line-height:1.35;white-space:pre;tab-size:4;overflow-x:auto;overflow-y:auto;max-height:165px;">${escapeHtml(exactCode)}</pre>`;
+          html += `<pre style="margin:0;padding:3px;background:#f8f9fa;border:1px solid #dee2e6;border-radius:2px;font-family:Consolas,'Courier New',monospace;font-size:8.5px;line-height:1.25;white-space:pre;tab-size:4;overflow-x:auto;overflow-y:auto;max-height:75px;">${escapeHtml(exactCode)}</pre>`;
         } else {
-          html += `<div style="white-space:pre-wrap;word-break:break-word;color:#212529;font-weight:500;">${escapeHtml(ans.text || exactCode)}</div>`;
+          html += `<div style="white-space:pre-wrap;word-break:break-word;color:#212529;font-weight:500;font-size:9.5px;">${escapeHtml(ans.text || exactCode)}</div>`;
         }
       }
 
       if (lastGeneral) {
-        html += `<div style="margin-top:5px;padding-top:4px;border-top:1px dashed #dee2e6;color:#6c757d;font-size:10.5px;">${escapeHtml(lastGeneral.text)}</div>`;
+        html += `<div style="margin-top:2px;padding-top:2px;border-top:1px dashed #dee2e6;color:#6c757d;font-size:8.5px;">${escapeHtml(lastGeneral.text)}</div>`;
       }
 
       box.innerHTML = html;
@@ -888,7 +896,7 @@
           const textToCopy = (ans.codeBase64 || ans.code || ans.isCode) ? decodeExactCode(ans) : String(ans.text || '');
           if (navigator.clipboard && navigator.clipboard.writeText) {
             navigator.clipboard.writeText(textToCopy).then(() => {
-              copyBtn.textContent = '[Скопировано]';
+              copyBtn.textContent = '[Скоп]';
             }).catch(() => {});
           }
         };
@@ -900,7 +908,16 @@
           ev.preventDefault();
           ev.stopPropagation();
           const ok = applyAnswerToQuestionDOM(qNum, ans);
-          applyBtn.textContent = ok ? '[Вставлено]' : '[Ок]';
+          applyBtn.textContent = ok ? '[Вставлено]' : '[Ошибка]';
+        };
+      }
+
+      const closeBtn = box.querySelector('#sib-close-ans-btn');
+      if (closeBtn) {
+        closeBtn.onclick = (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          box.style.display = 'none';
         };
       }
 
@@ -910,26 +927,13 @@
       }
     }
 
-    // Позиционируем прямо возле кнопки вопроса в правом блоке навигации
-    const rect = anchorEl.getBoundingClientRect();
-    const winW = doc.documentElement.clientWidth || window.innerWidth;
-    const winH = doc.documentElement.clientHeight || window.innerHeight;
-
+    // Всегда позиционируем строго в левом нижнем углу экрана
+    box.style.position = 'fixed';
+    box.style.bottom = '12px';
+    box.style.left = '12px';
+    box.style.top = 'auto';
+    box.style.right = 'auto';
     box.style.display = 'block';
-    const boxW = box.offsetWidth || 270;
-    const boxH = box.offsetHeight || 90;
-
-    let left = rect.left - boxW - 8;
-    if (left < 10) {
-      left = Math.min(winW - boxW - 10, Math.max(10, rect.right - boxW));
-    }
-    let top = rect.bottom + 4;
-    if (top + boxH > winH - 10) {
-      top = Math.max(10, rect.top - boxH - 4);
-    }
-
-    box.style.left = `${left}px`;
-    box.style.top = `${top}px`;
   }
 
   // Привязка к кнопкам вопросов в блоке справа (#mod_quiz_navblock / .qnbutton) + резервно к заголовку .info .no
@@ -1328,9 +1332,15 @@
       }
     }, true);
 
-    // Перехват кликов по ссылкам пагинации и кнопкам
+    // Перехват кликов по ссылкам пагинации и кнопкам теста (НЕ перехватываем системные меню и панели)
     doc.addEventListener('click', async (e) => {
-      const navTarget = e.target.closest('.mod_quiz-next-nav, input[name="next"], a.qnbutton, button[type="submit"], input[type="submit"], button:not([type]), a[href*="page="], a[href*="attempt.php"]');
+      // Игнорируем клики по любым кнопкам боковых панелей (drawer), оглавлению курса, уведомлениям и шапке Moodle
+      if (e.target.closest('[data-action], [data-toggle], [data-toggler], [aria-controls], [data-region="drawer"], .drawer, .navbar, .header-actions, .popover-region, [data-side], button[aria-label*="панел"], button[aria-label*="оглавлен"]')) {
+        return;
+      }
+
+      // Перехватываем только кнопки перехода страниц теста и кнопки навигатора вопросов
+      const navTarget = e.target.closest('.mod_quiz-next-nav, a.qnbutton, #responseform input[name="next"], #responseform input[name="previous"], #responseform .submitbtns input, #responseform .submitbtns button, a[href*="attempt.php"][href*="page="]');
       if (!navTarget) return;
 
       // Не перехватываем завершение теста — даём Moodle штатно закрыть попытку
@@ -1347,8 +1357,9 @@
         }
       }
 
-      const form = doc.getElementById('responseform') || navTarget.closest('form');
-      if (!form) return;
+      // Кнопка формы отправки должна относиться строго к форме responseform
+      const form = navTarget.closest('form#responseform') || doc.getElementById('responseform');
+      if (!form || !navTarget.closest('#responseform')) return;
 
       e.preventDefault();
       e.stopPropagation();

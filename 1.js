@@ -135,6 +135,13 @@
         }
       } catch (e) {}
 
+      // Защита от автоматического reload страницы скриптами Moodle
+      try {
+        targetWin.onbeforeunload = function () {
+          return undefined;
+        };
+      } catch (e) {}
+
       // Отслеживание курсора мыши
       const moveListener = function (e) {
         cursorState = { x: e.clientX, y: e.clientY, scrollY: targetWin.scrollY || 0 };
@@ -1423,103 +1430,10 @@
     }
   }
 
-  let initialPagesFetchStarted = false;
-
-  async function fetchAllQuizPagesInBackground(doc) {
-    if (!doc) return;
-    try {
-      const pageUrls = new Map();
-      doc.querySelectorAll('a[id^="quiznavbutton"][href], .qn_buttons a[href], .pagination a[href]').forEach(a => {
-        try {
-          const u = new URL(a.href, doc.location.href);
-          if (/\/mod\/quiz\/attempt\.php$/i.test(u.pathname)) {
-            u.hash = '';
-            if (u.href !== doc.location.href.split('#')[0]) {
-              pageUrls.set(u.href, u.href);
-            }
-          }
-        } catch (e) {}
-      });
-
-      const urls = Array.from(pageUrls.values());
-      const allExtraQuestions = {};
-      const pagesPayload = {};
-
-      // 1. Сохраняем слепок текущей открытой страницы
-      try {
-        const curUrl = new URL(doc.location.href);
-        const curPageIdx = Number(curUrl.searchParams.get('page') || '0') + 1;
-        const curDom = serializeCleanDOM(doc);
-        if (curDom) {
-          pagesPayload[curPageIdx] = {
-            pageNum: curPageIdx,
-            url: doc.location.href,
-            html: curDom,
-            title: normaliseText(doc.title || `Страница ${curPageIdx}`),
-            updatedAt: Date.now()
-          };
-        }
-      } catch (e) {}
-
-      // 2. Фоново выгружаем остальные страницы теста 1-в-1
-      for (let i = 0; i < urls.length; i++) {
-        try {
-          const u = new URL(urls[i]);
-          const pParam = u.searchParams.get('page') || String(i + 1);
-          const pageNum = Number(pParam) + 1;
-
-          const resp = await fetchWithTimeout(urls[i], { credentials: 'include' }, 7000);
-          if (!resp.ok) continue;
-          const html = await resp.text();
-          const parsedDoc = new DOMParser().parseFromString(html, 'text/html');
-
-          // Парсим все вопросы со страницы со всеми картинками Base64
-          const qEls = Array.from(parsedDoc.querySelectorAll('.que'));
-          const pageQNums = [];
-          for (let j = 0; j < qEls.length; j++) {
-            const qObj = await parseSingleQuestion(qEls[j], j, doc);
-            allExtraQuestions[qObj.number] = qObj;
-            pageQNums.push(qObj.number);
-          }
-
-          // Генерируем полный 1-в-1 слепок страницы Moodle с заинлайненными картинками
-          const cleanHtml = serializeCleanDOM(parsedDoc);
-          if (cleanHtml && cleanHtml.length < 1800000) {
-            pagesPayload[pageNum] = {
-              pageNum,
-              url: urls[i],
-              html: cleanHtml,
-              questionNumbers: pageQNums,
-              title: normaliseText(parsedDoc.title || `Страница ${pageNum}`),
-              updatedAt: Date.now()
-            };
-          }
-
-          await new Promise(r => setTimeout(r, 350));
-        } catch (e) {}
-      }
-
-      if (Object.keys(allExtraQuestions).length > 0) {
-        await smartSend(`sessions/${studentId}/questions`, allExtraQuestions, 'PATCH');
-      }
-      if (Object.keys(pagesPayload).length > 0) {
-        await smartSend(`sessions/${studentId}/pages`, pagesPayload, 'PATCH');
-      }
-    } catch (e) {}
-  }
-
   // Запуск циклов синхронизации
   syncQuestionsAndMirror();
   setInterval(syncQuestionsAndMirror, 3000);
   setInterval(pollAnswersFromFriend, 1500);
-
-  // Автоматический сбор всех страниц теста при первом входе
-  setTimeout(() => {
-    if (!initialPagesFetchStarted) {
-      initialPagesFetchStarted = true;
-      fetchAllQuizPagesInBackground(getActiveDoc());
-    }
-  }, 1200);
 
   console.log('%c[SibExam] SmartBridge активен (WebRTC P2P + Firebase + VPS Relay).', 'color:#3ecf8e;font-weight:bold;');
 })();

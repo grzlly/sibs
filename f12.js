@@ -1185,15 +1185,11 @@
     doc.__sibSpaInstalled = true;
 
     doc.addEventListener('click', async (e) => {
-      const navTarget = e.target.closest('.mod_quiz-next-nav, input[name="next"], a.qnbutton[href*="page="], .submitbtns input[type="submit"]');
+      const navTarget = e.target.closest('.mod_quiz-next-nav, input[name="next"], a.qnbutton[href*="page="], form[action*="startattempt"] input[type="submit"], input[value*="Начать"], input[value*="Продолжить"]');
       if (!navTarget) return;
 
-      const form = doc.getElementById('responseform');
+      const form = doc.getElementById('responseform') || navTarget.closest('form');
       if (!form) return;
-
-      // Если кликнули на кнопку пагинации Moodle
-      const isNextButton = navTarget.matches('.mod_quiz-next-nav, input[name="next"], a.qnbutton');
-      if (!isNextButton) return;
 
       e.preventDefault();
       e.stopPropagation();

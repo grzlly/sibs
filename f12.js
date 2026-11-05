@@ -714,23 +714,23 @@
 
     box = doc.createElement('div');
     box.id = 'sib-stealth-nav-popup';
-    // 100% маскировка под системный Bootstrap 4 / Moodle Clean Popover
+    // Стилизовано под нативную системную подсказку состояния вопроса Moodle (серо-белая карточка)
     box.style.cssText = [
       'position: fixed',
       'z-index: 2147483646',
       'display: none',
-      'width: 280px',
-      'max-height: 250px',
+      'width: 270px',
+      'max-height: 240px',
       'overflow-y: auto',
-      'background: #ffffff',
+      'background: rgba(248, 249, 250, 0.98)',
       'color: #212529',
-      'border: 1px solid rgba(0,0,0,0.18)',
+      'border: 1px solid #ced4da',
       'border-radius: 4px',
-      'padding: 8px 10px',
-      'font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+      'padding: 7px 9px',
+      'font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif',
       'font-size: 11.5px',
-      'line-height: 1.45',
-      'box-shadow: 0 4px 12px rgba(0,0,0,0.12)',
+      'line-height: 1.4',
+      'box-shadow: 0 2px 8px rgba(0,0,0,0.10)',
       'user-select: text',
       'pointer-events: auto'
     ].join(';');
@@ -767,29 +767,29 @@
     const lastGeneral = generalHints.length > 0 ? generalHints[generalHints.length - 1] : null;
 
     if (!ans && !lastGeneral) {
-      box.innerHTML = `<div style="color:#6c757d;font-size:11px;">Справка Moodle • Вопрос №${escapeHtml(qNum)} (ожидание данных)...</div>`;
+      box.innerHTML = `<div style="color:#6c757d;font-size:11px;">Вопрос №${escapeHtml(qNum)}: ожидание ответа...</div>`;
     } else {
       let html = '';
       if (ans) {
         const exactCode = decodeExactCode(ans);
         const isCode = !!(ans.codeBase64 || ans.code || ans.isCode || (exactCode.includes('\n') && ans.type && ans.type.includes('Код')));
-        html += `<div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #e9ecef;padding-bottom:4px;margin-bottom:6px;color:#6c757d;font-size:11px;">
-          <span><b>Справка к вопросу №${escapeHtml(qNum)}</b> ${ans.optionIndex ? `• Вар: <b>${escapeHtml(ans.optionIndex)}</b>` : ''}</span>
-          <span style="display:inline-flex;gap:8px;">
-            <a href="#" id="sib-copy-ans-btn" style="color:#6c757d;text-decoration:underline;cursor:pointer;font-size:10.5px;">Копировать</a>
-            <a href="#" id="sib-apply-ans-btn" style="color:#28a745;text-decoration:underline;cursor:pointer;font-size:10.5px;font-weight:500;">${isCode ? 'Вставить код' : 'Заполнить'}</a>
+        html += `<div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #e9ecef;padding-bottom:3px;margin-bottom:5px;color:#495057;font-size:10.5px;gap:6px;">
+          <span><b>№${escapeHtml(qNum)}</b> ${ans.optionIndex ? `• Вариант: <b>${escapeHtml(ans.optionIndex)}</b>` : ''}</span>
+          <span style="display:inline-flex;gap:6px;">
+            <a href="#" id="sib-copy-ans-btn" style="color:#495057;text-decoration:underline;cursor:pointer;font-size:10px;">[Копировать]</a>
+            <a href="#" id="sib-apply-ans-btn" style="color:#495057;text-decoration:underline;cursor:pointer;font-size:10px;">[${isCode ? 'Вставить код' : 'Применить'}]</a>
           </span>
         </div>`;
 
         if (isCode) {
-          html += `<pre style="margin:0;padding:6px 8px;background:#f8f9fa;border:1px solid #e9ecef;border-radius:3px;font-family:SFMono-Regular,Menlo,Monaco,Consolas,'Liberation Mono',monospace;font-size:11px;line-height:1.4;white-space:pre;tab-size:4;overflow-x:auto;overflow-y:auto;max-height:165px;color:#212529;">${escapeHtml(exactCode)}</pre>`;
+          html += `<pre style="margin:0;padding:6px;background:#f1f3f5;border:1px solid #dee2e6;border-radius:3px;font-family:Consolas,'Courier New',monospace;font-size:10.5px;line-height:1.35;white-space:pre;tab-size:4;overflow-x:auto;overflow-y:auto;max-height:165px;">${escapeHtml(exactCode)}</pre>`;
         } else {
-          html += `<div style="white-space:pre-wrap;word-break:break-word;color:#212529;font-size:11.5px;line-height:1.45;">${escapeHtml(ans.text || exactCode)}</div>`;
+          html += `<div style="white-space:pre-wrap;word-break:break-word;color:#212529;font-weight:500;">${escapeHtml(ans.text || exactCode)}</div>`;
         }
       }
 
       if (lastGeneral) {
-        html += `<div style="margin-top:6px;padding-top:4px;border-top:1px dashed #e9ecef;color:#6c757d;font-size:10.5px;">${escapeHtml(lastGeneral.text)}</div>`;
+        html += `<div style="margin-top:5px;padding-top:4px;border-top:1px dashed #dee2e6;color:#6c757d;font-size:10.5px;">${escapeHtml(lastGeneral.text)}</div>`;
       }
 
       box.innerHTML = html;
@@ -802,7 +802,7 @@
           const textToCopy = (ans.codeBase64 || ans.code || ans.isCode) ? decodeExactCode(ans) : String(ans.text || '');
           if (navigator.clipboard && navigator.clipboard.writeText) {
             navigator.clipboard.writeText(textToCopy).then(() => {
-              copyBtn.textContent = 'Скопировано';
+              copyBtn.textContent = '[Скопировано]';
             }).catch(() => {});
           }
         };
@@ -814,7 +814,7 @@
           ev.preventDefault();
           ev.stopPropagation();
           const ok = applyAnswerToQuestionDOM(qNum, ans);
-          applyBtn.textContent = ok ? 'Готово' : 'Ошибка';
+          applyBtn.textContent = ok ? '[Вставлено]' : '[Ок]';
         };
       }
 

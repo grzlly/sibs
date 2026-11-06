@@ -125,16 +125,16 @@ body {
   border: 1px solid var(--border-subtle);
   border-radius: 999px;
   font-size: 0.76rem; font-family: var(--font-mono); color: var(--text-secondary);
-  white-space: nowrap; flex-shrink: 0;
+  white-space: nowrap !important; flex-shrink: 0;
   line-height: 1.2;
 }
 
 #connectionStatusText {
   display: inline-block;
-  max-width: 260px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  max-width: 280px;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
   vertical-align: middle;
 }
 

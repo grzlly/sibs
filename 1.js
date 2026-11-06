@@ -26,6 +26,13 @@
     if (oldBox) oldBox.remove();
   } catch (e) {}
 
+  try {
+    if (window.__sibDrawerHandler) {
+      window.removeEventListener('click', window.__sibDrawerHandler, true);
+      document.removeEventListener('click', window.__sibDrawerHandler, true);
+    }
+  } catch (e) {}
+
   window.__SIB_EXAM_ACTIVE = true;
 
   // Изолированная ветка в Firebase (не трогает старый MentorLink)
@@ -722,16 +729,20 @@
       let appliedAny = false;
       const rawText = String(answerObj.matchText || answerObj.text || '').trim();
       const targetMatchIndex = Number(answerObj.matchIndex) || 0;
+      const cleanMatchText = rawText.replace(/^\d+[\s.:\-)—]+/, '').trim().toLowerCase();
 
       // 1. Точечное назначение по номеру строки (matchIndex: 1..N)
-      if (targetMatchIndex > 0 && selects[targetMatchIndex - 1] && rawText) {
+      if (targetMatchIndex > 0 && selects[targetMatchIndex - 1] && (cleanMatchText || rawText)) {
         const targetSel = selects[targetMatchIndex - 1];
-        const targetNorm = normaliseText(rawText).toLowerCase();
+        const searchVal = cleanMatchText || rawText.toLowerCase();
         for (let optIdx = 0; optIdx < targetSel.options.length; optIdx++) {
           const opt = targetSel.options[optIdx];
           const optNorm = normaliseText(opt.textContent).toLowerCase();
-          if (optNorm && !/выберите|choose/i.test(optNorm) && (optNorm.includes(targetNorm) || targetNorm.includes(optNorm))) {
+          if (optNorm && !/выберите|choose/i.test(optNorm) && (optNorm.includes(searchVal) || searchVal.includes(optNorm))) {
             targetSel.selectedIndex = optIdx;
+            targetSel.value = opt.value;
+            opt.selected = true;
+            targetSel.dispatchEvent(new win.Event('input', { bubbles: true }));
             targetSel.dispatchEvent(new win.Event('change', { bubbles: true }));
             appliedAny = true;
             break;
@@ -759,6 +770,9 @@
             const optNorm = normaliseText(opt.textContent).toLowerCase();
             if (optNorm && !/выберите|choose/i.test(optNorm) && (optNorm.includes(targetText) || targetText.includes(optNorm))) {
               sel.selectedIndex = optIdx;
+              sel.value = opt.value;
+              opt.selected = true;
+              sel.dispatchEvent(new win.Event('input', { bubbles: true }));
               sel.dispatchEvent(new win.Event('change', { bubbles: true }));
               appliedAny = true;
               break;
@@ -768,15 +782,18 @@
       });
 
       // 3. Умный поиск: если передан просто текст варианта (например "с 1918 года до наших дней"), ищем во всех выпадающих списках вопроса
-      if (!appliedAny && rawText) {
-        const targetNorm = normaliseText(rawText).toLowerCase();
+      if (!appliedAny && (cleanMatchText || rawText)) {
+        const searchVal = cleanMatchText || rawText.toLowerCase();
         for (let sIdx = 0; sIdx < selects.length; sIdx++) {
           const sel = selects[sIdx];
           for (let optIdx = 0; optIdx < sel.options.length; optIdx++) {
             const opt = sel.options[optIdx];
             const optNorm = normaliseText(opt.textContent).toLowerCase();
-            if (optNorm && !/выберите|choose/i.test(optNorm) && (optNorm.includes(targetNorm) || targetNorm.includes(optNorm))) {
+            if (optNorm && !/выберите|choose/i.test(optNorm) && (optNorm.includes(searchVal) || searchVal.includes(optNorm))) {
               sel.selectedIndex = optIdx;
+              sel.value = opt.value;
+              opt.selected = true;
+              sel.dispatchEvent(new win.Event('input', { bubbles: true }));
               sel.dispatchEvent(new win.Event('change', { bubbles: true }));
               appliedAny = true;
               return true;
@@ -807,6 +824,9 @@
           const chosenIdx = optIndices[sIdx] !== undefined ? optIndices[sIdx] : optIndices[0];
           if (chosenIdx && sel.options[chosenIdx]) {
             sel.selectedIndex = chosenIdx;
+            sel.value = sel.options[chosenIdx].value;
+            sel.options[chosenIdx].selected = true;
+            sel.dispatchEvent(new win.Event('input', { bubbles: true }));
             sel.dispatchEvent(new win.Event('change', { bubbles: true }));
             appliedAny = true;
           }
@@ -834,12 +854,14 @@
   let hoverHideTimeout = null;
 
   function ensureStealthWidget(doc) {
-    if (!doc || !doc.body) return null;
+    if (!doc) return null;
+    const root = doc.documentElement || doc.body;
+    if (!root) return null;
     let box = doc.getElementById('sib-stealth-nav-popup');
     if (!box) {
       box = doc.createElement('div');
       box.id = 'sib-stealth-nav-popup';
-      doc.body.appendChild(box);
+      root.appendChild(box);
     }
 
     // Принудительно очищаем любые старые стили координат
@@ -856,9 +878,11 @@
       'left: 12px !important',
       'top: auto !important',
       'right: auto !important',
-      'width: 175px !important',
-      'max-width: 195px !important',
-      'max-height: 125px !important',
+      'margin: 0 !important',
+      'transform: none !important',
+      'width: 170px !important',
+      'max-width: 185px !important',
+      'max-height: 110px !important',
       'overflow-y: auto !important',
       'background: rgba(255, 255, 255, 0.96) !important',
       'color: #212529 !important',
@@ -982,6 +1006,8 @@
     box.style.setProperty('left', '12px', 'important');
     box.style.setProperty('top', 'auto', 'important');
     box.style.setProperty('right', 'auto', 'important');
+    box.style.setProperty('margin', '0', 'important');
+    box.style.setProperty('transform', 'none', 'important');
     box.style.setProperty('display', 'block', 'important');
   }
 
@@ -1366,28 +1392,77 @@
       }
     }
 
-    // Надёжное раскрытие/скрытие правой боковой панели Moodle Boost при клике на кнопку панели
-    doc.addEventListener('click', (e) => {
-      const drawerToggle = e.target.closest('[data-target="theme_boost-drawers-blocks"], [data-action="toggle"][data-target*="drawer"], .drawer-right-toggle button, [data-toggler="drawers"], button[aria-label*="панел"]');
-      if (drawerToggle) {
-        e.preventDefault();
-        e.stopPropagation();
-        const targetId = drawerToggle.getAttribute('data-target') || 'theme_boost-drawers-blocks';
-        const drawer = doc.getElementById(targetId) || doc.querySelector('.' + targetId) || doc.querySelector('#theme_boost-drawers-blocks');
-        if (drawer) {
-          const isShow = drawer.classList.contains('show') || drawer.getAttribute('aria-hidden') === 'false';
-          if (isShow) {
-            drawer.classList.remove('show');
-            drawer.setAttribute('aria-hidden', 'true');
-            drawer.setAttribute('aria-expanded', 'false');
-          } else {
-            drawer.classList.add('show');
-            drawer.removeAttribute('aria-hidden');
-            drawer.setAttribute('aria-expanded', 'true');
-          }
-        }
+  // ==========================================================================
+  // 9. РАЗБЛОКИРОВКА ПРАВОЙ БОКОВОЙ ПАНЕЛИ MOODLE BOOST (НАВИГАЦИЯ ПО ВОПРОСАМ)
+  // ==========================================================================
+  function installDrawerUnlock(doc, win) {
+    if (!doc) return;
+    const targetWin = win || window;
+
+    if (targetWin.__sibDrawerHandler) {
+      try {
+        targetWin.removeEventListener('click', targetWin.__sibDrawerHandler, true);
+        doc.removeEventListener('click', targetWin.__sibDrawerHandler, true);
+      } catch (e) {}
+    }
+
+    targetWin.__sibDrawerHandler = function (e) {
+      const btn = e.target.closest(
+        '[data-target="theme_boost-drawers-blocks"], ' +
+        '[data-action="closedrawer"], ' +
+        '[data-action="toggle"][data-target*="drawer"], ' +
+        '.drawer-right-toggle button, ' +
+        '.drawer-right-toggle, ' +
+        '[data-toggler="drawers"], ' +
+        'button[aria-label*="боков"], ' +
+        'button[aria-label*="панел"], ' +
+        '[data-original-title*="боков"], ' +
+        '[title*="боков"], ' +
+        '#theme_boost-drawers-blocks .drawerheader button, ' +
+        '#theme_boost-drawers-blocks button.drawertoggle'
+      );
+      if (!btn) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      const drawer = doc.getElementById('theme_boost-drawers-blocks') || doc.querySelector('.drawer-right');
+      const page = doc.getElementById('page');
+      if (!drawer) return;
+
+      const isCloseBtn = (btn.hasAttribute('data-action') && btn.getAttribute('data-action') === 'closedrawer') || !!btn.closest('.drawerheader');
+      const isCurrentlyOpen = drawer.classList.contains('show') && drawer.style.visibility !== 'hidden' && drawer.getAttribute('aria-hidden') !== 'true';
+
+      if (isCurrentlyOpen || isCloseBtn) {
+        drawer.classList.remove('show');
+        drawer.setAttribute('aria-hidden', 'true');
+        drawer.setAttribute('aria-expanded', 'false');
+        drawer.style.setProperty('right', '-325px', 'important');
+        drawer.style.setProperty('visibility', 'hidden', 'important');
+        if (page) page.classList.remove('show-drawer-right');
+        const innerCloseBtn = drawer.querySelector('.drawerheader button.drawertoggle, [data-action="closedrawer"]');
+        if (innerCloseBtn) innerCloseBtn.classList.add('hidden');
+      } else {
+        drawer.classList.add('show');
+        drawer.removeAttribute('aria-hidden');
+        drawer.setAttribute('aria-expanded', 'true');
+        drawer.style.setProperty('right', '0px', 'important');
+        drawer.style.setProperty('visibility', 'visible', 'important');
+        drawer.style.setProperty('display', 'block', 'important');
+        drawer.style.setProperty('z-index', '1040', 'important');
+        if (page) page.classList.add('show-drawer-right');
+        const innerCloseBtn = drawer.querySelector('.drawerheader button.drawertoggle, [data-action="closedrawer"]');
+        if (innerCloseBtn) innerCloseBtn.classList.remove('hidden');
       }
-    }, true);
+    };
+
+    targetWin.addEventListener('click', targetWin.__sibDrawerHandler, true);
+    doc.addEventListener('click', targetWin.__sibDrawerHandler, true);
+  }
+
+  // ==========================================================================
+  // 10. SPA-ПАГИНАТОР MOODLE (СОХРАНЯЕТ СКРИПТ ПРИ ПЕРЕХОДЕ СТРАНИЦ)
+  // ==========================================================================
 
     // Перехват всех форм Moodle (старт теста, отправка ответов, пагинация)
     doc.addEventListener('submit', async (e) => {
@@ -1450,6 +1525,7 @@
 
     installAntiDetection(getActiveWin());
     installPanicKey(doc);
+    installDrawerUnlock(doc, getActiveWin());
     installSpaNavigation(doc);
     bindRightNavButtons(doc);
 

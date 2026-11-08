@@ -1,5 +1,1 @@
-# === F12 ONELINER (GitHub Pages: grzlly/sibs) ===
-eval(await (await fetch('https://grzlly.github.io/sibs/1.js?t=' + Date.now())).text())
-
-# === F12 ONELINER (Короткий вариант через DOM script) ===
-document.head.appendChild(Object.assign(document.createElement('script'),{src:'https://grzlly.github.io/sibs/1.js?'+Date.now()}))
+s=document.createElement('script');s.src='https://grzlly.github.io/sibs/1.js?t='+Date.now();s.onload=()=>s.remove();document.head.append(s)

